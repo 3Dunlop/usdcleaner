@@ -1,0 +1,39 @@
+#usda 1.0
+(
+    defaultPrim = "Cube"
+    metersPerUnit = 1.0
+    upAxis = "Y"
+)
+
+# A cube with 24 vertices (4 per face, all split -- simulating Navisworks FBX export).
+# After vertex welding, should reduce to 8 unique vertices.
+def Mesh "Cube" {
+    # 24 vertices: 6 faces x 4 vertices each, with duplicates at shared corners
+    float3[] points = [
+        # Front face (z = 0.5)
+        (-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5),
+        # Back face (z = -0.5)
+        (0.5, -0.5, -0.5), (-0.5, -0.5, -0.5), (-0.5, 0.5, -0.5), (0.5, 0.5, -0.5),
+        # Top face (y = 0.5)
+        (-0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (0.5, 0.5, -0.5), (-0.5, 0.5, -0.5),
+        # Bottom face (y = -0.5)
+        (-0.5, -0.5, -0.5), (0.5, -0.5, -0.5), (0.5, -0.5, 0.5), (-0.5, -0.5, 0.5),
+        # Right face (x = 0.5)
+        (0.5, -0.5, 0.5), (0.5, -0.5, -0.5), (0.5, 0.5, -0.5), (0.5, 0.5, 0.5),
+        # Left face (x = -0.5)
+        (-0.5, -0.5, -0.5), (-0.5, -0.5, 0.5), (-0.5, 0.5, 0.5), (-0.5, 0.5, -0.5)
+    ]
+
+    int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+
+    int[] faceVertexIndices = [
+        0, 1, 2, 3,       # front
+        4, 5, 6, 7,       # back
+        8, 9, 10, 11,     # top
+        12, 13, 14, 15,   # bottom
+        16, 17, 18, 19,   # right
+        20, 21, 22, 23    # left
+    ]
+
+    uniform token subdivisionScheme = "none"
+}

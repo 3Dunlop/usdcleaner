@@ -1,0 +1,39 @@
+# Build artifacts
+build/
+out/
+cmake-build-*/
+
+# IDE files
+.vs/
+.vscode/
+*.sln
+*.vcxproj*
+.idea/
+
+# Compiled objects
+*.obj
+*.o
+*.lib
+*.a
+*.dll
+*.so
+*.dylib
+*.pyd
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+
+# vcpkg
+vcpkg_installed/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Claude
+.claude/

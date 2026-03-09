@@ -1,0 +1,80 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 26,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "windows-vcpkg",
+            "displayName": "Windows x64 (vcpkg)",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "x64-windows"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "windows-vcpkg-debug",
+            "displayName": "Windows x64 Debug (vcpkg)",
+            "inherits": "windows-vcpkg",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "windows-prebuilt-usd",
+            "displayName": "Windows x64 (Pre-built USD)",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+                "VCPKG_TARGET_TRIPLET": "x64-windows",
+                "pxr_DIR": "$env{USD_ROOT}"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-vcpkg",
+            "configurePreset": "windows-vcpkg",
+            "configuration": "Release"
+        },
+        {
+            "name": "windows-vcpkg-debug",
+            "configurePreset": "windows-vcpkg-debug",
+            "configuration": "Debug"
+        },
+        {
+            "name": "windows-prebuilt-usd",
+            "configurePreset": "windows-prebuilt-usd",
+            "configuration": "Release"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "windows-vcpkg",
+            "configurePreset": "windows-vcpkg",
+            "configuration": "Release",
+            "output": {
+                "outputOnFailure": true
+            }
+        }
+    ]
+}

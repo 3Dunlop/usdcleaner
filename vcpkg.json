@@ -1,0 +1,21 @@
+{
+    "name": "usdcleaner",
+    "version-string": "0.1.0",
+    "description": "High-performance USD geometry and material optimization pipeline for BIM data",
+    "dependencies": [
+        {
+            "name": "meshoptimizer",
+            "version>=": "0.21"
+        },
+        {
+            "name": "gtest",
+            "version>=": "1.14.0"
+        },
+        {
+            "name": "cli11",
+            "version>=": "2.3.0"
+        }
+    ],
+    "overrides": [],
+    "builtin-baseline": "2024.09.30"
+}

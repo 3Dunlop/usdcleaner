@@ -1,0 +1,91 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1.0
+    upAxis = "Y"
+)
+
+# 5 materials where Steel_001, Steel_002, Steel_003 are identical (red),
+# and Concrete_001, Concrete_002 are identical (gray).
+# After deduplication, should have 2 unique materials.
+def Xform "World" {
+    def Scope "Materials" {
+        def Material "Steel_001" {
+            token outputs:surface.connect = </World/Materials/Steel_001/Shader.outputs:surface>
+            def Shader "Shader" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.8, 0.1, 0.1)
+                float inputs:metallic = 0.9
+                float inputs:roughness = 0.3
+                token outputs:surface
+            }
+        }
+        def Material "Steel_002" {
+            token outputs:surface.connect = </World/Materials/Steel_002/Shader.outputs:surface>
+            def Shader "Shader" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.8, 0.1, 0.1)
+                float inputs:metallic = 0.9
+                float inputs:roughness = 0.3
+                token outputs:surface
+            }
+        }
+        def Material "Steel_003" {
+            token outputs:surface.connect = </World/Materials/Steel_003/Shader.outputs:surface>
+            def Shader "Shader" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.8, 0.1, 0.1)
+                float inputs:metallic = 0.9
+                float inputs:roughness = 0.3
+                token outputs:surface
+            }
+        }
+        def Material "Concrete_001" {
+            token outputs:surface.connect = </World/Materials/Concrete_001/Shader.outputs:surface>
+            def Shader "Shader" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.5, 0.5, 0.5)
+                float inputs:metallic = 0.0
+                float inputs:roughness = 0.8
+                token outputs:surface
+            }
+        }
+        def Material "Concrete_002" {
+            token outputs:surface.connect = </World/Materials/Concrete_002/Shader.outputs:surface>
+            def Shader "Shader" {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0.5, 0.5, 0.5)
+                float inputs:metallic = 0.0
+                float inputs:roughness = 0.8
+                token outputs:surface
+            }
+        }
+    }
+
+    def Mesh "Beam_001" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    ) {
+        rel material:binding = </World/Materials/Steel_001>
+        float3[] points = [(0,0,0), (1,0,0), (0,1,0)]
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+    }
+
+    def Mesh "Beam_002" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    ) {
+        rel material:binding = </World/Materials/Steel_002>
+        float3[] points = [(2,0,0), (3,0,0), (2,1,0)]
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+    }
+
+    def Mesh "Wall_001" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    ) {
+        rel material:binding = </World/Materials/Concrete_001>
+        float3[] points = [(0,0,0), (5,0,0), (5,3,0), (0,3,0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+    }
+}
