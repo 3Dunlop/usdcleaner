@@ -13,6 +13,10 @@ set(USDCLEANER_CORE_SOURCES
     instancing/GeometryHasher.cpp
     instancing/PointInstancerAuthor.cpp
     hierarchy/HierarchyFlattener.cpp
+    occlusion/BvhBuilder.cpp
+    occlusion/InteriorCuller.cpp
+    lod/LodGenerator.cpp
+    lod/VariantSetAuthor.cpp
     pipeline/Pipeline.cpp
     pipeline/StageProcessor.cpp
     pipeline/BatchProcessor.cpp

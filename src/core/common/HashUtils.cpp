@@ -85,6 +85,7 @@ struct SHA256Hasher::State {
 };
 
 SHA256Hasher::SHA256Hasher() : state_(std::make_unique<State>()) {}
+SHA256Hasher::~SHA256Hasher() = default;
 
 void SHA256Hasher::Update(const void* data, size_t length) {
     const uint8_t* bytes = static_cast<const uint8_t*>(data);

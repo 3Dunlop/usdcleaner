@@ -3,6 +3,8 @@
 #include "core/pipeline/OptimizationPass.h"
 #include "core/common/SpatialHash.h"
 
+#include <pxr/usd/usdGeom/mesh.h>
+
 namespace usdcleaner {
 
 // Welds coincident vertices within a configurable epsilon tolerance.

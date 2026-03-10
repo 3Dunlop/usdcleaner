@@ -22,6 +22,15 @@ function(add_usdcleaner_test test_name test_source)
     )
 
     add_test(NAME ${test_name} COMMAND ${test_name})
+
+    # Ensure DLLs can be found at test runtime
+    set(_test_path "$<TARGET_FILE_DIR:usdcleaner_core>")
+    if(USD_ROOT)
+        set(_test_path "${_test_path}\;${USD_ROOT}/lib\;${USD_ROOT}/bin")
+    endif()
+    set_tests_properties(${test_name} PROPERTIES
+        ENVIRONMENT "PATH=${_test_path}\;$ENV{PATH}"
+    )
 endfunction()
 
 # Unit tests

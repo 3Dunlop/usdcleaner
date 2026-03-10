@@ -13,9 +13,9 @@
         },
         {
             "name": "cli11",
-            "version>=": "2.3.0"
+            "version>=": "2.3.2"
         }
     ],
     "overrides": [],
-    "builtin-baseline": "2024.09.30"
+    "builtin-baseline": "751fdf7bbc534a1a745acd19da4f01452d511d39"
 }

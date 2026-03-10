@@ -20,6 +20,12 @@ if(WIN32)
     add_compile_definitions(WIN32_LEAN_AND_MEAN)
 endif()
 
+# Map imported config for pre-built USD (built as RelWithDebInfo).
+# Order: try native config first (for vcpkg), then RelWithDebInfo (for USD).
+set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE Release RelWithDebInfo "")
+set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Debug RelWithDebInfo "")
+set(CMAKE_MAP_IMPORTED_CONFIG_MINSIZEREL MinSizeRel Release RelWithDebInfo "")
+
 # Include helper modules
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CompilerWarnings)

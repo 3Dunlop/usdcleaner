@@ -11,6 +11,7 @@ namespace usdcleaner {
 class USDCLEANER_API SHA256Hasher {
 public:
     SHA256Hasher();
+    ~SHA256Hasher();
 
     // Feed data incrementally
     void Update(const void* data, size_t length);
