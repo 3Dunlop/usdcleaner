@@ -4,11 +4,16 @@
 #include "core/pipeline/Pipeline.h"
 
 #include <string>
+#include <vector>
 
 namespace usdcleaner {
 
 // Configuration for stage processing
 struct USDCLEANER_API ProcessorConfig {
+    // Metadata stripping
+    bool enableMetadataStrip = true;
+    bool enableIdentityXformStrip = true;
+
     // Vertex welding
     bool enableWelding = true;
     float weldingEpsilon = 0.0f;  // 0 = auto-detect
@@ -22,6 +27,14 @@ struct USDCLEANER_API ProcessorConfig {
     // Material deduplication
     bool enableMaterialDedup = true;
     bool skipAnimatedMaterials = true;
+
+    // Geometric instancing (Phase 2)
+    bool enableInstancing = false;  // off by default
+    int minInstanceCount = 3;
+
+    // Hierarchy flattening (Phase 2)
+    bool enableHierarchyFlattening = false;  // off by default
+    std::vector<std::string> preservePatterns;
 
     // GPU cache optimization
     bool enableCacheOptimization = true;

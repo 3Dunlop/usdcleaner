@@ -3,6 +3,8 @@ set(USDCLEANER_CORE_SOURCES
     common/SpatialHash.cpp
     common/HashUtils.cpp
     common/UsdUtils.cpp
+    metadata/MetadataStripper.cpp
+    metadata/IdentityXformStripper.cpp
     welding/VertexWelder.cpp
     welding/PrimvarRemapper.cpp
     topology/DegenerateFaceRemover.cpp
@@ -28,6 +30,8 @@ set(USDCLEANER_CORE_HEADERS
     common/SpatialHash.h
     common/HashUtils.h
     common/UsdUtils.h
+    metadata/MetadataStripper.h
+    metadata/IdentityXformStripper.h
     welding/VertexWelder.h
     welding/PrimvarRemapper.h
     topology/DegenerateFaceRemover.h

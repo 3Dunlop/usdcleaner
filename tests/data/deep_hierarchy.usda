@@ -1,0 +1,76 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "Root"
+{
+    # Single-child chain: A -> B -> C -> Mesh
+    # B and C should be flattened away
+    def Xform "A"
+    {
+        double3 xformOp:translate = (1.0, 0.0, 0.0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Xform "B"
+        {
+            double3 xformOp:translate = (0.0, 2.0, 0.0)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+
+            def Xform "C"
+            {
+                double3 xformOp:translate = (0.0, 0.0, 3.0)
+                uniform token[] xformOpOrder = ["xformOp:translate"]
+
+                def Mesh "Cube"
+                {
+                    float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+                    int[] faceVertexCounts = [4]
+                    int[] faceVertexIndices = [0, 1, 2, 3]
+                }
+            }
+        }
+    }
+
+    # Multi-child Xform: should NOT be flattened
+    def Xform "MultiChild"
+    {
+        def Mesh "MeshA"
+        {
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0)]
+            int[] faceVertexCounts = [3]
+            int[] faceVertexIndices = [0, 1, 2]
+        }
+
+        def Mesh "MeshB"
+        {
+            float3[] points = [(0, 0, 0), (0, 1, 0), (0, 1, 1)]
+            int[] faceVertexCounts = [3]
+            int[] faceVertexIndices = [0, 1, 2]
+        }
+    }
+
+    # Xform with material binding: should NOT be flattened
+    def Xform "WithBinding" (
+        prepend apiSchemas = ["MaterialBindingAPI"]
+    )
+    {
+        rel material:binding = </Root/Materials/Mat>
+
+        def Mesh "BoundMesh"
+        {
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0)]
+            int[] faceVertexCounts = [3]
+            int[] faceVertexIndices = [0, 1, 2]
+        }
+    }
+
+    def Scope "Materials"
+    {
+        def Material "Mat"
+        {
+        }
+    }
+}

@@ -1,8 +1,12 @@
 #include "core/pipeline/StageProcessor.h"
+#include "core/metadata/MetadataStripper.h"
+#include "core/metadata/IdentityXformStripper.h"
 #include "core/welding/VertexWelder.h"
 #include "core/topology/DegenerateFaceRemover.h"
 #include "core/topology/LaminaFaceRemover.h"
 #include "core/materials/MaterialDeduplicator.h"
+#include "core/instancing/PointInstancerAuthor.h"
+#include "core/hierarchy/HierarchyFlattener.h"
 #include "core/cache/GpuCacheOptimizer.h"
 
 #include <pxr/usd/usd/stage.h>
@@ -21,7 +25,16 @@ StageProcessor::StageProcessor(const ProcessorConfig& config)
 }
 
 void StageProcessor::BuildDefaultPipeline() {
-    // Order matters: Weld -> Degenerate -> Lamina -> MaterialDedup -> CacheOpt
+    // Pass order: MetadataStrip -> IdentityXformStrip -> Weld -> Degenerate
+    //          -> Lamina -> MaterialDedup -> Instancing -> HierarchyFlatten -> CacheOpt
+
+    if (config_.enableMetadataStrip) {
+        pipeline_.AddPass(std::make_shared<MetadataStripper>());
+    }
+
+    if (config_.enableIdentityXformStrip) {
+        pipeline_.AddPass(std::make_shared<IdentityXformStripper>());
+    }
 
     if (config_.enableWelding) {
         auto welder = std::make_shared<VertexWelder>();
@@ -44,6 +57,18 @@ void StageProcessor::BuildDefaultPipeline() {
         auto matDedup = std::make_shared<MaterialDeduplicator>();
         matDedup->SetSkipAnimated(config_.skipAnimatedMaterials);
         pipeline_.AddPass(matDedup);
+    }
+
+    if (config_.enableInstancing) {
+        auto instancer = std::make_shared<PointInstancerAuthor>();
+        instancer->SetMinInstanceCount(config_.minInstanceCount);
+        pipeline_.AddPass(instancer);
+    }
+
+    if (config_.enableHierarchyFlattening) {
+        auto flattener = std::make_shared<HierarchyFlattener>();
+        flattener->SetPreservePatterns(config_.preservePatterns);
+        pipeline_.AddPass(flattener);
     }
 
     if (config_.enableCacheOptimization) {

@@ -1,0 +1,74 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "Root" (
+    customData = {
+        string userDocBrief = "Root node from FBX export"
+    }
+)
+{
+    def Xform "Building" (
+        customData = {
+            string userDocBrief = "Building_01"
+        }
+    )
+    {
+        def Mesh "Wall" (
+            customData = {
+                string userDocBrief = "Basic Wall:Generic - 200mm:12345"
+            }
+        )
+        {
+            # Normal mesh attributes
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+
+            # Redundant subdivision defaults (bloat)
+            uniform token subdivisionScheme = "none"
+            uniform token interpolateBoundary = "edgeAndCorner"
+            uniform token faceVaryingLinearInterpolation = "cornersPlus1"
+            uniform token triangleSubdivisionRule = "catmullClark"
+
+            # Empty arrays (bloat)
+            int[] cornerIndices = []
+            float[] cornerSharpnesses = []
+            int[] creaseIndices = []
+            int[] creaseLengths = []
+            float[] creaseSharpnesses = []
+        }
+
+        def Mesh "Floor" (
+            customData = {
+                string userDocBrief = "Floor:Generic 300mm:67890"
+            }
+        )
+        {
+            float3[] points = [(0, 0, 0), (2, 0, 0), (2, 0, 2), (0, 0, 2)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+
+            # Redundant defaults
+            uniform token subdivisionScheme = "none"
+
+            # Empty arrays
+            int[] cornerIndices = []
+            float[] cornerSharpnesses = []
+        }
+    }
+
+    def Xform "NoCustomData"
+    {
+        # This prim has no customData - should not be affected
+        def Mesh "SimpleMesh"
+        {
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0)]
+            int[] faceVertexCounts = [3]
+            int[] faceVertexIndices = [0, 1, 2]
+        }
+    }
+}
