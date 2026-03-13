@@ -1,0 +1,144 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    metersPerUnit = 0.01
+    upAxis = "Y"
+)
+
+def Xform "Root"
+{
+    # === CENTROID NORMALIZATION TEST ===
+    # Three cubes with identical shape but different local-space vertex offsets.
+    # Without centroid normalization, these hash differently.
+    # With centroid normalization, these should all match.
+
+    def Xform "OffsetCubeA"
+    {
+        double3 xformOp:translate = (0.0, 0.0, 0.0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Mesh"
+        {
+            # Unit cube at local origin (0,0,0)-(1,1,1)
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 5, 4, 2, 3, 7, 6, 0, 3, 7, 4, 1, 2, 6, 5]
+        }
+    }
+
+    def Xform "OffsetCubeB"
+    {
+        double3 xformOp:translate = (5.0, 0.0, 0.0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Mesh"
+        {
+            # Same unit cube but offset to (100,200,300)-(101,201,301)
+            # This is the BIM pattern: Navisworks bakes world offsets into vertices
+            float3[] points = [(100, 200, 300), (101, 200, 300), (101, 201, 300), (100, 201, 300), (100, 200, 301), (101, 200, 301), (101, 201, 301), (100, 201, 301)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 5, 4, 2, 3, 7, 6, 0, 3, 7, 4, 1, 2, 6, 5]
+        }
+    }
+
+    def Xform "OffsetCubeC"
+    {
+        double3 xformOp:translate = (10.0, 0.0, 0.0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Mesh"
+        {
+            # Same unit cube offset to (-50,-50,-50)-(-49,-49,-49)
+            float3[] points = [(-50, -50, -50), (-49, -50, -50), (-49, -49, -50), (-50, -49, -50), (-50, -50, -49), (-49, -50, -49), (-49, -49, -49), (-50, -49, -49)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 5, 4, 2, 3, 7, 6, 0, 3, 7, 4, 1, 2, 6, 5]
+        }
+    }
+
+    # === MULTI-MATERIAL TEST ===
+    # Three cubes with same geometry (at origin) but different materials.
+    # Should create a single PointInstancer with multiple prototypes.
+
+    def Xform "MatCubeRed"
+    {
+        double3 xformOp:translate = (20.0, 0.0, 0.0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Mesh" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </Root/Materials/RedMaterial>
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 5, 4, 2, 3, 7, 6, 0, 3, 7, 4, 1, 2, 6, 5]
+        }
+    }
+
+    def Xform "MatCubeBlue"
+    {
+        double3 xformOp:translate = (25.0, 0.0, 0.0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Mesh" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </Root/Materials/BlueMaterial>
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 5, 4, 2, 3, 7, 6, 0, 3, 7, 4, 1, 2, 6, 5]
+        }
+    }
+
+    def Xform "MatCubeRed2"
+    {
+        double3 xformOp:translate = (30.0, 0.0, 0.0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Mesh" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            rel material:binding = </Root/Materials/RedMaterial>
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 5, 4, 2, 3, 7, 6, 0, 3, 7, 4, 1, 2, 6, 5]
+        }
+    }
+
+    def Scope "Materials"
+    {
+        def Material "RedMaterial"
+        {
+            token outputs:surface.connect = </Root/Materials/RedMaterial/Shader.outputs:surface>
+
+            def Shader "Shader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (1, 0, 0)
+                token outputs:surface
+            }
+        }
+
+        def Material "BlueMaterial"
+        {
+            token outputs:surface.connect = </Root/Materials/BlueMaterial/Shader.outputs:surface>
+
+            def Shader "Shader"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor = (0, 0, 1)
+                token outputs:surface
+            }
+        }
+    }
+
+    # A genuinely different mesh (triangle) - should NOT be instanced with cubes
+    def Mesh "DifferentShape"
+    {
+        float3[] points = [(0, 0, 0), (2, 0, 0), (1, 2, 0)]
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+    }
+}

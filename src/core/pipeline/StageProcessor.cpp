@@ -62,6 +62,8 @@ void StageProcessor::BuildDefaultPipeline() {
     if (config_.enableInstancing) {
         auto instancer = std::make_shared<PointInstancerAuthor>();
         instancer->SetMinInstanceCount(config_.minInstanceCount);
+        instancer->SetNormalizeCentroids(config_.normalizeCentroids);
+        instancer->SetNormalizeScale(config_.normalizeScale);
         pipeline_.AddPass(instancer);
     }
 

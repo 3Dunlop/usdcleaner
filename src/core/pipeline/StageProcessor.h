@@ -30,7 +30,9 @@ struct USDCLEANER_API ProcessorConfig {
 
     // Geometric instancing (Phase 2)
     bool enableInstancing = false;  // off by default
-    int minInstanceCount = 3;
+    int minInstanceCount = 2;
+    bool normalizeCentroids = true;   // centroid-normalized matching (BIM win)
+    bool normalizeScale = false;      // scale-invariant matching (aggressive)
 
     // Hierarchy flattening (Phase 2)
     bool enableHierarchyFlattening = false;  // off by default

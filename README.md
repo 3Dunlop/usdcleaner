@@ -16,7 +16,7 @@ BIM data exported from Navisworks produces heavily bloated USD stages: disconnec
 | **Degenerate Face Removal** | Removes faces with < 3 unique vertex indices (created by welding), compacting faceVarying primvars | On |
 | **Lamina Face Removal** | Removes duplicate faces via canonical hash with secondary comparison to prevent false positives | On |
 | **Material Deduplication** | Deep SHA-256 hashing of full shader networks including material interface inputs; rebinds direct and per-face-subset material bindings | On |
-| **Geometric Instancing** | Replaces groups of identical meshes with `UsdGeomPointInstancer` prims with descriptive prototype names, preserving material bindings | Off |
+| **Geometric Instancing** | Centroid-normalized matching of identical meshes into `UsdGeomPointInstancer` prims with multi-material prototype support | Off |
 | **Hierarchy Flattening** | Collapses single-child Xform chains, composing transforms bottom-up, preserving animated transforms | Off |
 | **GPU Cache Optimization** | meshoptimizer-based vertex cache and fetch optimization with full primvar remapping | On |
 
@@ -74,7 +74,7 @@ cmake --build build --config Release
 Tests require USD and Python DLLs on PATH. Use the provided PowerShell scripts:
 
 ```powershell
-# Run all 42 tests (11 suites)
+# Run all 47 tests (11 suites)
 .\run_tests.ps1
 
 # Run a single test suite
@@ -113,7 +113,9 @@ usdcleaner input.usd -o output.usdc \
   --no-metadata-strip \
   --no-identity-xform-strip \
   --enable-instancing \
-  --min-instance-count 3 \
+  --min-instance-count 2 \
+  --no-normalize-centroids \
+  --enable-scale-normalization \
   --enable-hierarchy-flatten \
   --format usdc
 
@@ -153,7 +155,7 @@ src/
   bindings/       # Python bindings (boost::python)
 python/           # Python package (orchestration layer)
 tests/
-  cpp/            # Google Test unit and integration tests (42 tests, 11 suites)
+  cpp/            # Google Test unit and integration tests (47 tests, 11 suites)
   data/           # Test USD files
 cmake/            # CMake modules and USD dependency stubs
 ```
@@ -178,7 +180,7 @@ cmake/            # CMake modules and USD dependency stubs
 | `test_pipeline` | 3 | Full pipeline integration, idempotency, JSON metrics |
 | `test_metadata_stripper` | 4 | customData removal, empty arrays, subdiv defaults |
 | `test_identity_xform` | 4 | Identity transform detection and clearing |
-| `test_instancing` | 3 | Geometry hashing, PointInstancer creation |
+| `test_instancing` | 8 | Geometry hashing, PointInstancer, centroid normalization, multi-material |
 | `test_hierarchy` | 4 | Single-child chain flattening, safety checks |
 | `test_regression_fixes` | 10 | Regression tests for v3 bug fixes + v4 material fixes |
 
@@ -194,6 +196,8 @@ The optimization passes include the following safety measures:
 - **Primvar consistency**: Face removal passes compact faceVarying and uniform primvars in lockstep with topology changes. GPU cache optimization remaps all vertex-interpolated primvars when reordering vertices.
 - **Index bounds validation**: VertexWelder validates all remapped indices against the new points array size, logging errors for out-of-bounds indices instead of producing corrupt geometry.
 - **Material binding preservation**: PointInstancerAuthor extracts and reapplies material bindings to prototypes. MaterialDeduplicator handles both direct and per-face-subset bindings.
+- **Centroid-normalized instancing**: Meshes with identical shape but different local-space offsets (common in Navisworks BIM exports) are correctly matched by translating vertices to centroid origin before hashing. Instance transforms are adjusted to compensate.
+- **Multi-material instancing**: Meshes with identical geometry but different material bindings are grouped into a single PointInstancer with multiple prototypes (one per unique material), using `protoIndices` to map each instance to its material variant.
 - **Descriptive prototype naming**: PointInstancerAuthor derives prototype names from source mesh/parent names (e.g., `proto_WallPanel`) instead of generic `proto_0` numbering.
 - **Concave polygon safety**: GpuCacheOptimizer detects n-gons (faces with >4 vertices) and skips meshes containing them to avoid incorrect fan triangulation.
 
@@ -201,23 +205,28 @@ The optimization passes include the following safety measures:
 
 Tested on 12 Navisworks USD files (1,606 MB total input) with the full 9-pass pipeline:
 
-| File | Input | Output | Materials In → Out | Time |
-|------|-------|--------|-------------------|------|
-| CIV-50001 | 0.25 MB | 0.41 MB | 13 → 5 | 0.1s |
-| CIV-50002 | 10.09 MB | 10.03 MB | 310 → 5 | 1.0s |
-| STR-50002 | 10.29 MB | 9.96 MB | 3,523 → 2 | 4.8s |
-| ARC-50001 | 97.59 MB | 97.28 MB | 7,129 → 83 | 19.2s |
-| ARC-50002 | 16.25 MB | 15.74 MB | 3,352 → 29 | 5.4s |
-| FAC-50003 | 690.16 MB | 689.08 MB | 6,424 → 33 | 45.9s |
-| FCT-50001 | 2.89 MB | 2.89 MB | 129 → 2 | 0.6s |
-| RND-INT | 713.90 MB | 710.62 MB | 28,319 → 81 | 119.3s |
-| LSE-50001 | 22.56 MB | 22.51 MB | 877 → 26 | 2.5s |
-| LSE-50002 | 5.65 MB | 5.74 MB | 2,079 → 7 | 1.7s |
-| WFT-50001 | 30.04 MB | 30.24 MB | 1,360 → 4 | 4.7s |
-| SGN-50001 | 6.58 MB | 6.70 MB | 111 → 6 | 2.0s |
-| **Total** | **1,606 MB** | **1,601 MB** | **53,626 → 283** | **207s** |
+| File | Input | Output | Materials | Meshes Instanced | Time |
+|------|-------|--------|-----------|-----------------|------|
+| CIV-50001 | 0.25 MB | 0.41 MB | 13 → 5 | 0/12 | 0.7s |
+| CIV-50002 | 10.09 MB | 10.03 MB | 310 → 5 | 0/291 | 0.9s |
+| STR-50002 | 10.29 MB | 9.92 MB | 3,523 → 2 | 362/3,522 | 5.7s |
+| ARC-50001 | 97.59 MB | 97.14 MB | 7,129 → 83 | 636/6,391 | 20.9s |
+| ARC-50002 | 16.25 MB | 15.66 MB | 3,352 → 29 | 1,035/3,223 | 5.4s |
+| FAC-50003 | 690.16 MB | 688.71 MB | 6,424 → 33 | 762/5,690 | 40.5s |
+| FCT-50001 | 2.89 MB | 2.66 MB | 129 → 2 | 61/107 | 0.5s |
+| **RND-INT** | **713.90 MB** | **697.47 MB** | **28,319 → 81** | **14,064/19,082** | **114s** |
+| LSE-50001 | 22.56 MB | 22.51 MB | 877 → 26 | 86/800 | 2.6s |
+| LSE-50002 | 5.65 MB | 5.74 MB | 2,079 → 7 | 21/180 | 1.9s |
+| WFT-50001 | 30.04 MB | 30.17 MB | 1,360 → 4 | 269/979 | 4.8s |
+| SGN-50001 | 6.58 MB | 6.70 MB | 111 → 6 | 8/33 | 1.8s |
+| **Total** | **1,606 MB** | **1,587 MB** | **53,626 → 283** | **17,304/40,310** | **200s** |
 
-Material deduplication is the primary win: 53,626 materials reduced to 283 unique materials across all files. File size reduction is modest (0.31%) because BIM geometry is already dense and each element tends to be geometrically unique — the main value is scene graph cleanliness and runtime performance (124K intermediate Xform prims removed, duplicate materials pruned by 99.5%).
+Key optimizations:
+- **Material deduplication**: 53,626 → 283 unique materials (99.5% reduction)
+- **Centroid-normalized instancing**: 17,304 meshes instanced (43% of all meshes) into 5,309 PointInstancers — up from 243 meshes (0.6%) in v4 before centroid normalization
+- **RND-INT highlight**: 14,064 of 19,082 meshes (74%) instanced, reducing file from 714 MB to 697 MB
+- **File size**: 19.15 MB total reduction (1.19%) — 4x more than v4's 5.04 MB (0.31%)
+- **Scene graph**: 124K intermediate Xform prims flattened
 
 ## License
 

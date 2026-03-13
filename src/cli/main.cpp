@@ -42,11 +42,15 @@ int main(int argc, char* argv[]) {
 
     // Phase 2 toggles (opt-in)
     bool enableInstancing = false;
-    int minInstanceCount = 3;
+    int minInstanceCount = 2;
     bool enableHierarchyFlatten = false;
+    bool noNormalizeCentroids = false;
+    bool enableScaleNormalization = false;
     app.add_flag("--enable-instancing", enableInstancing, "Enable geometric instancing (PointInstancer)");
-    app.add_option("--min-instance-count", minInstanceCount, "Minimum meshes to form an instance group (default: 3)");
+    app.add_option("--min-instance-count", minInstanceCount, "Minimum meshes to form an instance group (default: 2)");
     app.add_flag("--enable-hierarchy-flatten", enableHierarchyFlatten, "Enable hierarchy flattening");
+    app.add_flag("--no-normalize-centroids", noNormalizeCentroids, "Disable centroid normalization for instancing");
+    app.add_flag("--enable-scale-normalization", enableScaleNormalization, "Enable scale-invariant instancing");
 
     // Welding options
     float epsilon = 0.0f;
@@ -81,6 +85,8 @@ int main(int argc, char* argv[]) {
     config.enableMaterialDedup = !noMaterialDedup;
     config.enableInstancing = enableInstancing;
     config.minInstanceCount = minInstanceCount;
+    config.normalizeCentroids = !noNormalizeCentroids;
+    config.normalizeScale = enableScaleNormalization;
     config.enableHierarchyFlattening = enableHierarchyFlatten;
     config.enableCacheOptimization = !noCacheOpt;
     config.triangulate = triangulate;
