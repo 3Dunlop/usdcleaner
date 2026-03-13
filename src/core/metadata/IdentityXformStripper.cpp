@@ -50,6 +50,19 @@ void IdentityXformStripper::Execute(const UsdStageRefPtr& stage) {
             continue;
         }
 
+        // Skip any xformable that has time-sampled xformOps — removing an
+        // identity-at-default-time transform would destroy animation data.
+        bool hasTimeSamples = false;
+        for (const auto& op : ops) {
+            if (op.GetAttr().GetNumTimeSamples() > 0) {
+                hasTimeSamples = true;
+                break;
+            }
+        }
+        if (hasTimeSamples) {
+            continue;
+        }
+
         // Compose local transform
         GfMatrix4d localXform(1.0);
         bool success = xformable.GetLocalTransformation(&localXform, &resetsXformStack,

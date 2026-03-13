@@ -54,12 +54,21 @@ void VertexWelder::WeldMesh(UsdGeomMesh& mesh, float epsilon) {
 
     if (!anyWelded) return;
 
-    // Remap face vertex indices
+    // Remap face vertex indices with bounds validation
+    bool hasOutOfBounds = false;
     for (size_t i = 0; i < faceVertexIndices.size(); ++i) {
         int oldIdx = faceVertexIndices[i];
-        if (oldIdx >= 0 && static_cast<size_t>(oldIdx) < remap.size()) {
-            faceVertexIndices[i] = static_cast<int>(remap[oldIdx]);
+        if (oldIdx < 0 || static_cast<size_t>(oldIdx) >= remap.size()) {
+            if (!hasOutOfBounds) {
+                std::cerr << "[VertexWelding] " << mesh.GetPrim().GetPath()
+                          << ": index " << oldIdx << " out of range [0, "
+                          << remap.size() << ") at position " << i << "\n";
+                hasOutOfBounds = true;
+            }
+            // Leave index unchanged — will be caught by compaction pass below
+            continue;
         }
+        faceVertexIndices[i] = static_cast<int>(remap[oldIdx]);
     }
 
     // Compact the points array

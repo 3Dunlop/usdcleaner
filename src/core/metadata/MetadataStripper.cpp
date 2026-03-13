@@ -63,7 +63,12 @@ void MetadataStripper::Execute(const UsdStageRefPtr& stage) {
 
             VtValue val;
             if (!attr.Get(&val)) {
-                // Get() returned false — attribute has no value (None-valued)
+                // Get() returned false — attribute has no default value.
+                // But it might have time samples! Don't remove time-sampled attrs.
+                if (attr.GetNumTimeSamples() > 0) {
+                    continue;
+                }
+                // Truly empty — no default value and no time samples
                 mods.propsToRemove.push_back(prop.GetName());
                 continue;
             }
@@ -91,12 +96,18 @@ void MetadataStripper::Execute(const UsdStageRefPtr& stage) {
 
         if (mods.clearCustomData) {
             SdfPrimSpecHandle primSpec = rootLayer->GetPrimAtPath(mods.path);
-            if (primSpec) {
-                // ClearInfo removes the entire customData field from the prim spec.
-                // This is correct because schema-provided defaults will still
-                // be visible via UsdPrim::GetCustomData(), but the authored
-                // (file-level) data is gone.
-                primSpec->ClearInfo(SdfFieldKeys->CustomData);
+            if (primSpec && primSpec->HasInfo(SdfFieldKeys->CustomData)) {
+                // Only erase the 'userDocBrief' key from customData, preserving
+                // any other entries (BIM properties, user annotations, etc.).
+                VtDictionary cd = primSpec->GetCustomData();
+                cd.erase("userDocBrief");
+                if (cd.empty()) {
+                    // All entries removed — clear the entire customData field
+                    primSpec->ClearInfo(SdfFieldKeys->CustomData);
+                } else {
+                    // Other entries remain — write back the modified dictionary
+                    primSpec->SetInfo(SdfFieldKeys->CustomData, VtValue(cd));
+                }
                 customDataEntriesRemoved_++;
             }
         }

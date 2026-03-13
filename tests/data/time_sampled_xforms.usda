@@ -1,0 +1,47 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+    endTimeCode = 10
+    startTimeCode = 0
+)
+
+def Xform "Root"
+{
+    # This prim has a time-sampled identity xform — should NOT be stripped
+    float3 xformOp:translate.timeSamples = {
+        0: (0, 0, 0),
+        10: (5, 0, 0),
+    }
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    # This prim has a static identity xform — SHOULD be stripped
+    def Xform "StaticIdentity"
+    {
+        float3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Cube"
+        {
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+        }
+    }
+
+    # This prim has a time-sampled non-identity xform — should NOT be flattened
+    def Xform "AnimatedParent"
+    {
+        double3 xformOp:translate.timeSamples = {
+            0: (0, 0, 0),
+            10: (10, 0, 0),
+        }
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+
+        def Mesh "Child"
+        {
+            float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+        }
+    }
+}

@@ -1,0 +1,43 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+)
+
+def Xform "Root"
+{
+    # Mesh with faceVarying UVs and a degenerate + duplicate face
+    def Mesh "MeshWithFVPrimvars"
+    {
+        float3[] points = [
+            (0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+            (2, 0, 0), (2, 1, 0)
+        ]
+        int[] faceVertexCounts = [3, 3, 3, 3]
+        int[] faceVertexIndices = [
+            0, 1, 2,
+            0, 2, 3,
+            4, 5, 2,
+            0, 1, 2
+        ]
+
+        # faceVarying UVs — one per face-vertex (12 total for 4 faces * 3 verts)
+        texCoord2f[] primvars:st = [
+            (0, 0), (1, 0), (1, 1),
+            (0, 0), (1, 1), (0, 1),
+            (0, 0), (0, 1), (1, 1),
+            (0, 0), (1, 0), (1, 1)
+        ] (
+            interpolation = "faceVarying"
+        )
+
+        # faceVarying normals — one per face-vertex
+        normal3f[] primvars:normals = [
+            (0, 0, 1), (0, 0, 1), (0, 0, 1),
+            (0, 0, 1), (0, 0, 1), (0, 0, 1),
+            (0, 0, 1), (0, 0, 1), (0, 0, 1),
+            (0, 0, 1), (0, 0, 1), (0, 0, 1)
+        ] (
+            interpolation = "faceVarying"
+        )
+    }
+}

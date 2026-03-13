@@ -3,6 +3,9 @@
 
 #include <pxr/usd/sdf/changeBlock.h>
 #include <pxr/usd/usdGeom/mesh.h>
+#include <pxr/usd/usdGeom/primvarsAPI.h>
+#include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/base/vt/value.h>
 
 #ifdef USDCLEANER_HAS_MESHOPTIMIZER
 #include <meshoptimizer.h>
@@ -12,6 +15,38 @@
 #include <vector>
 
 namespace usdcleaner {
+
+namespace {
+
+// Check if a mesh has any n-gon faces (vertex count > 4) which may be concave.
+// Fan triangulation from vertex 0 is only safe for convex polygons (triangles, convex quads).
+bool HasNgons(const VtIntArray& faceVertexCounts) {
+    for (int count : faceVertexCounts) {
+        if (count > 4) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Remap a VtArray<T> using a vertex remap table produced by meshoptimizer.
+// remapTable maps old_index -> new_index for each original vertex.
+template<typename T>
+VtArray<T> RemapVertexArray(const VtArray<T>& data,
+                             const unsigned int* remapTable,
+                             size_t oldVertexCount,
+                             size_t newVertexCount) {
+    VtArray<T> result(newVertexCount);
+    for (size_t i = 0; i < data.size() && i < oldVertexCount; ++i) {
+        unsigned int newIdx = remapTable[i];
+        if (newIdx < newVertexCount) {
+            result[newIdx] = data[i];
+        }
+    }
+    return result;
+}
+
+} // anonymous namespace
 
 void GpuCacheOptimizer::Execute(const UsdStageRefPtr& stage) {
 #ifndef USDCLEANER_HAS_MESHOPTIMIZER
@@ -28,6 +63,21 @@ void GpuCacheOptimizer::Execute(const UsdStageRefPtr& stage) {
         mesh.GetFaceVertexCountsAttr().Get(&faceVertexCounts);
 
         if (points.empty() || faceVertexIndices.empty()) return;
+
+        // Check for n-gons: fan triangulation is unsafe for concave polygons
+        bool hasNgonFaces = HasNgons(faceVertexCounts);
+        if (hasNgonFaces && triangulate_) {
+            std::cout << "[GpuCacheOptimization] " << mesh.GetPrim().GetPath()
+                      << ": skipping — has n-gon faces (>4 verts) which may be concave; "
+                      << "fan triangulation would corrupt geometry\n";
+            return;
+        }
+
+        if (hasNgonFaces) {
+            std::cout << "[GpuCacheOptimization] " << mesh.GetPrim().GetPath()
+                      << ": warning — has n-gon faces; cache optimization uses fan "
+                      << "triangulation internally (geometry output unchanged)\n";
+        }
 
         // Triangulate: convert faceVertexCounts + faceVertexIndices to triangle list
         std::vector<unsigned int> triangleIndices;
@@ -67,7 +117,7 @@ void GpuCacheOptimizer::Execute(const UsdStageRefPtr& stage) {
             optimizedIndices.size(),
             points.size());
 
-        // Apply vertex remap
+        // Apply vertex remap to positions
         std::vector<float> remappedVerts(uniqueVertices * 3);
         meshopt_remapVertexBuffer(
             remappedVerts.data(),
@@ -83,9 +133,9 @@ void GpuCacheOptimizer::Execute(const UsdStageRefPtr& stage) {
             optimizedIndices.size(),
             remapTable.data());
 
-        // Write back as triangulated mesh if requested, or preserve original topology
+        // Write back as triangulated mesh if requested
         if (triangulate_) {
-            // Store as triangles
+            // Build new points array
             VtVec3fArray newPoints(uniqueVertices);
             std::memcpy(newPoints.data(), remappedVerts.data(),
                         uniqueVertices * sizeof(float) * 3);
@@ -100,9 +150,67 @@ void GpuCacheOptimizer::Execute(const UsdStageRefPtr& stage) {
             mesh.GetPointsAttr().Set(newPoints);
             mesh.GetFaceVertexIndicesAttr().Set(newIndices);
             mesh.GetFaceVertexCountsAttr().Set(newCounts);
+
+            // Remap all vertex-interpolated primvars to match the new vertex order.
+            // Without this, normals, UVs, colors etc. become misaligned with positions.
+            UsdGeomPrimvarsAPI primvarsAPI(mesh);
+            for (auto& pv : primvarsAPI.GetPrimvars()) {
+                TfToken interpolation = pv.GetInterpolation();
+                if (interpolation != UsdGeomTokens->vertex &&
+                    interpolation != UsdGeomTokens->varying) {
+                    continue;
+                }
+
+                VtValue val;
+                if (!pv.Get(&val)) continue;
+
+                if (val.IsHolding<VtVec3fArray>()) {
+                    auto data = val.UncheckedGet<VtVec3fArray>();
+                    if (data.size() == points.size()) {
+                        pv.Set(RemapVertexArray(data, remapTable.data(),
+                                                points.size(), uniqueVertices));
+                    }
+                } else if (val.IsHolding<VtVec2fArray>()) {
+                    auto data = val.UncheckedGet<VtVec2fArray>();
+                    if (data.size() == points.size()) {
+                        pv.Set(RemapVertexArray(data, remapTable.data(),
+                                                points.size(), uniqueVertices));
+                    }
+                } else if (val.IsHolding<VtFloatArray>()) {
+                    auto data = val.UncheckedGet<VtFloatArray>();
+                    if (data.size() == points.size()) {
+                        pv.Set(RemapVertexArray(data, remapTable.data(),
+                                                points.size(), uniqueVertices));
+                    }
+                } else if (val.IsHolding<VtVec4fArray>()) {
+                    auto data = val.UncheckedGet<VtVec4fArray>();
+                    if (data.size() == points.size()) {
+                        pv.Set(RemapVertexArray(data, remapTable.data(),
+                                                points.size(), uniqueVertices));
+                    }
+                } else if (val.IsHolding<VtIntArray>()) {
+                    auto data = val.UncheckedGet<VtIntArray>();
+                    if (data.size() == points.size()) {
+                        pv.Set(RemapVertexArray(data, remapTable.data(),
+                                                points.size(), uniqueVertices));
+                    }
+                } else if (val.IsHolding<VtVec3dArray>()) {
+                    auto data = val.UncheckedGet<VtVec3dArray>();
+                    if (data.size() == points.size()) {
+                        pv.Set(RemapVertexArray(data, remapTable.data(),
+                                                points.size(), uniqueVertices));
+                    }
+                } else if (val.IsHolding<VtDoubleArray>()) {
+                    auto data = val.UncheckedGet<VtDoubleArray>();
+                    if (data.size() == points.size()) {
+                        pv.Set(RemapVertexArray(data, remapTable.data(),
+                                                points.size(), uniqueVertices));
+                    }
+                }
+            }
         }
-        // If not triangulating, we still benefit from the vertex fetch
-        // optimization but keep original face topology.
+        // If not triangulating, we still benefit from the analysis but
+        // preserve original topology and vertex order.
     });
 #endif
 }

@@ -7,7 +7,7 @@
 #include <pxr/usd/usdGeom/mesh.h>
 
 #include <algorithm>
-#include <unordered_set>
+#include <unordered_map>
 #include <iostream>
 
 namespace usdcleaner {
@@ -23,7 +23,13 @@ void LaminaFaceRemover::Execute(const UsdStageRefPtr& stage) {
         if (faceVertexCounts.empty()) return;
 
         std::vector<bool> facesToKeep(faceVertexCounts.size(), true);
-        std::unordered_set<size_t> seenHashes;
+
+        // Map from hash -> list of sorted index sequences seen with that hash.
+        // This two-level approach prevents birthday-paradox hash collisions:
+        // when two different faces hash to the same value, we do a secondary
+        // comparison of the actual sorted indices before declaring them duplicates.
+        std::unordered_map<size_t, std::vector<std::vector<int>>> seenFaces;
+
         size_t offset = 0;
         size_t duplicateCount = 0;
 
@@ -41,12 +47,25 @@ void LaminaFaceRemover::Execute(const UsdStageRefPtr& stage) {
             size_t faceHash = HashIndexSequence(sortedIndices.data(),
                                                  sortedIndices.size());
 
-            if (seenHashes.count(faceHash)) {
-                // Potential duplicate -- mark for removal
-                facesToKeep[faceIdx] = false;
-                duplicateCount++;
+            auto it = seenFaces.find(faceHash);
+            if (it != seenFaces.end()) {
+                // Hash match — do secondary comparison against all faces with this hash
+                bool isActualDuplicate = false;
+                for (const auto& prevFace : it->second) {
+                    if (prevFace == sortedIndices) {
+                        isActualDuplicate = true;
+                        break;
+                    }
+                }
+                if (isActualDuplicate) {
+                    facesToKeep[faceIdx] = false;
+                    duplicateCount++;
+                } else {
+                    // Hash collision (different face, same hash) — keep both
+                    it->second.push_back(std::move(sortedIndices));
+                }
             } else {
-                seenHashes.insert(faceHash);
+                seenFaces[faceHash].push_back(std::move(sortedIndices));
             }
 
             offset += count;

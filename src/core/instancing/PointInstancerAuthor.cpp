@@ -10,10 +10,13 @@
 #include <pxr/usd/usdGeom/xformCache.h>
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/mesh.h>
+#include <pxr/usd/usdShade/materialBindingAPI.h>
+#include <pxr/usd/usdShade/material.h>
 #include <pxr/base/gf/matrix4d.h>
 #include <pxr/base/gf/matrix3d.h>
 #include <pxr/base/gf/vec3f.h>
 #include <pxr/base/gf/vec3d.h>
+#include <pxr/base/gf/quatf.h>
 #include <pxr/base/gf/quath.h>
 #include <pxr/base/gf/quatd.h>
 #include <pxr/base/gf/rotation.h>
@@ -51,9 +54,11 @@ SdfPath FindCommonParent(const std::vector<SdfPath>& paths) {
 
 // Decompose a world transform matrix into position, orientation, scale.
 // Returns false if the transform contains shear or negative determinant.
+// Uses GfQuatf (32-bit float) instead of GfQuath (16-bit half) for better
+// precision, especially important for large-scale BIM (buildings 100m+).
 bool DecomposeTransform(const GfMatrix4d& xform,
                         GfVec3f& outPosition,
-                        GfQuath& outOrientation,
+                        GfQuatf& outOrientation,
                         GfVec3f& outScale) {
     // Check determinant - negative means mirroring which PointInstancer can't represent
     double det = xform.GetDeterminant();
@@ -66,12 +71,6 @@ bool DecomposeTransform(const GfMatrix4d& xform,
         static_cast<float>(xform[3][0]),
         static_cast<float>(xform[3][1]),
         static_cast<float>(xform[3][2]));
-
-    // Extract the 3x3 upper-left for rotation/scale
-    GfMatrix4d noTranslate = xform;
-    noTranslate[3][0] = 0.0;
-    noTranslate[3][1] = 0.0;
-    noTranslate[3][2] = 0.0;
 
     // Extract scale as column magnitudes
     double sx = GfVec3d(xform[0][0], xform[0][1], xform[0][2]).GetLength();
@@ -111,13 +110,28 @@ bool DecomposeTransform(const GfMatrix4d& xform,
         rotMat[2][0], rotMat[2][1], rotMat[2][2]);
     GfRotation rotation = rotMat3d.ExtractRotation();
     GfQuatd quatd = rotation.GetQuat();
-    outOrientation = GfQuath(
-        static_cast<GfHalf>(quatd.GetReal()),
-        static_cast<GfHalf>(quatd.GetImaginary()[0]),
-        static_cast<GfHalf>(quatd.GetImaginary()[1]),
-        static_cast<GfHalf>(quatd.GetImaginary()[2]));
+    // Use GfQuatf (32-bit float) for better precision than GfQuath (16-bit half)
+    outOrientation = GfQuatf(
+        static_cast<float>(quatd.GetReal()),
+        static_cast<float>(quatd.GetImaginary()[0]),
+        static_cast<float>(quatd.GetImaginary()[1]),
+        static_cast<float>(quatd.GetImaginary()[2]));
 
     return true;
+}
+
+// Check if any xformOp on a prim has time samples
+bool HasTimeSampledTransform(const UsdPrim& prim) {
+    if (!prim.IsA<UsdGeomXformable>()) return false;
+    UsdGeomXformable xformable(prim);
+    bool resetsStack = false;
+    auto ops = xformable.GetOrderedXformOps(&resetsStack);
+    for (const auto& op : ops) {
+        if (op.GetAttr().GetNumTimeSamples() > 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // anonymous namespace
@@ -128,6 +142,12 @@ void PointInstancerAuthor::Execute(const UsdStageRefPtr& stage) {
 
     // 1. Hash all mesh topologies and group by hash
     ForEachMesh(stage, [&](UsdGeomMesh& mesh) {
+        // Skip meshes with time-sampled transforms — instancing would
+        // lose per-mesh animation (PointInstancer only has one set of time samples)
+        if (HasTimeSampledTransform(mesh.GetPrim())) {
+            return;
+        }
+
         HashDigest hash = hasher.HashMeshTopology(mesh, positionEpsilon_);
         groups[hash].push_back(mesh.GetPath());
     });
@@ -143,7 +163,9 @@ void PointInstancerAuthor::Execute(const UsdStageRefPtr& stage) {
             continue;
         }
 
-        // Extract world transforms and decompose
+        // Extract world transforms and decompose.
+        // We compute quaternions at float32 precision (GfQuatf) for accuracy,
+        // then convert to half-precision (GfQuath) for the USD schema.
         VtVec3fArray positions;
         VtQuathArray orientations;
         VtVec3fArray scales;
@@ -159,15 +181,20 @@ void PointInstancerAuthor::Execute(const UsdStageRefPtr& stage) {
             GfMatrix4d worldXform = xfCache.GetLocalToWorldTransform(prim);
 
             GfVec3f pos;
-            GfQuath orient;
+            GfQuatf orientF;
             GfVec3f scale;
-            if (!DecomposeTransform(worldXform, pos, orient, scale)) {
+            if (!DecomposeTransform(worldXform, pos, orientF, scale)) {
                 allDecomposable = false;
                 break;
             }
 
             positions.push_back(pos);
-            orientations.push_back(orient);
+            // Convert float32 quaternion to half-precision for USD schema
+            orientations.push_back(GfQuath(
+                static_cast<GfHalf>(orientF.GetReal()),
+                static_cast<GfHalf>(orientF.GetImaginary()[0]),
+                static_cast<GfHalf>(orientF.GetImaginary()[1]),
+                static_cast<GfHalf>(orientF.GetImaginary()[2])));
             scales.push_back(scale);
         }
 
@@ -177,7 +204,20 @@ void PointInstancerAuthor::Execute(const UsdStageRefPtr& stage) {
             continue;
         }
 
-        // 3. Create PointInstancer
+        // 3. Extract material binding from the first mesh BEFORE deleting originals
+        SdfPath materialPath;
+        {
+            UsdPrim firstMesh = stage->GetPrimAtPath(paths[0]);
+            if (firstMesh.IsValid()) {
+                UsdShadeMaterialBindingAPI bindingAPI(firstMesh);
+                UsdShadeMaterial boundMaterial = bindingAPI.ComputeBoundMaterial();
+                if (boundMaterial) {
+                    materialPath = boundMaterial.GetPrim().GetPath();
+                }
+            }
+        }
+
+        // 4. Create PointInstancer
         SdfPath parentPath = FindCommonParent(paths);
         std::string instancerName = "Instancer_" + std::to_string(instancerIndex++);
         SdfPath instancerPath = parentPath.AppendChild(TfToken(instancerName));
@@ -211,6 +251,17 @@ void PointInstancerAuthor::Execute(const UsdStageRefPtr& stage) {
             protoXformable.ClearXformOpOrder();
             for (const auto& op : ops) {
                 protoPrim.RemoveProperty(op.GetAttr().GetName());
+            }
+        }
+
+        // Bind the original material to the prototype mesh
+        if (!materialPath.IsEmpty() && protoPrim.IsValid()) {
+            UsdPrim materialPrim = stage->GetPrimAtPath(materialPath);
+            if (materialPrim.IsValid()) {
+                UsdShadeMaterialBindingAPI protoBindingAPI =
+                    UsdShadeMaterialBindingAPI::Apply(protoPrim);
+                UsdShadeMaterial material(materialPrim);
+                protoBindingAPI.Bind(material);
             }
         }
 

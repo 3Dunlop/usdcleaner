@@ -4,6 +4,7 @@
 #include <pxr/usd/sdf/changeBlock.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usdGeom/mesh.h>
+#include <pxr/usd/usdGeom/subset.h>
 #include <pxr/usd/usdShade/materialBindingAPI.h>
 
 #include <iostream>
@@ -53,27 +54,56 @@ void MaterialDeduplicator::Execute(const UsdStageRefPtr& stage) {
     std::cout << "[MaterialDeduplication] Found " << duplicateToMaster_.size()
               << " duplicate materials\n";
 
-    // Phase 3: Rebind all meshes from duplicates to masters
+    // Phase 3: Rebind all prims from duplicates to masters.
+    // Use GetDirectBinding() instead of ComputeBoundMaterial() to correctly
+    // handle inherited bindings — ComputeBoundMaterial() returns the composed
+    // material which may come from an ancestor, making the rebind lookup fail.
     {
         SdfChangeBlock block;
 
         for (auto prim : stage->Traverse()) {
-            if (!prim.IsA<UsdGeomMesh>()) continue;
-
             UsdShadeMaterialBindingAPI bindingAPI(prim);
-            UsdShadeMaterial boundMaterial = bindingAPI.ComputeBoundMaterial();
 
-            if (!boundMaterial) continue;
+            // 3a. Handle direct material binding on the prim itself
+            UsdShadeMaterialBindingAPI::DirectBinding directBinding =
+                bindingAPI.GetDirectBinding();
+            UsdShadeMaterial directMat = directBinding.GetMaterial();
+            if (directMat) {
+                std::string boundPath = directMat.GetPrim().GetPath().GetString();
+                auto it = duplicateToMaster_.find(boundPath);
+                if (it != duplicateToMaster_.end()) {
+                    SdfPath masterPath(it->second);
+                    UsdPrim masterPrim = stage->GetPrimAtPath(masterPath);
+                    if (masterPrim) {
+                        UsdShadeMaterial masterMaterial(masterPrim);
+                        bindingAPI.Bind(masterMaterial);
+                    }
+                }
+            }
 
-            std::string boundPath = boundMaterial.GetPrim().GetPath().GetString();
-            auto it = duplicateToMaster_.find(boundPath);
-            if (it != duplicateToMaster_.end()) {
-                // Rebind to the master material
-                SdfPath masterPath(it->second);
-                UsdPrim masterPrim = stage->GetPrimAtPath(masterPath);
-                if (masterPrim) {
-                    UsdShadeMaterial masterMaterial(masterPrim);
-                    bindingAPI.Bind(masterMaterial);
+            // 3b. Handle per-face subset bindings (materialBinding:subset)
+            // UsdGeomSubset children with material bindings
+            if (prim.IsA<UsdGeomMesh>()) {
+                for (auto child : prim.GetChildren()) {
+                    if (!child.IsA<UsdGeomSubset>()) continue;
+
+                    UsdShadeMaterialBindingAPI subsetBindingAPI(child);
+                    UsdShadeMaterialBindingAPI::DirectBinding subsetBinding =
+                        subsetBindingAPI.GetDirectBinding();
+                    UsdShadeMaterial subsetMat = subsetBinding.GetMaterial();
+                    if (!subsetMat) continue;
+
+                    std::string subsetBoundPath =
+                        subsetMat.GetPrim().GetPath().GetString();
+                    auto it = duplicateToMaster_.find(subsetBoundPath);
+                    if (it != duplicateToMaster_.end()) {
+                        SdfPath masterPath(it->second);
+                        UsdPrim masterPrim = stage->GetPrimAtPath(masterPath);
+                        if (masterPrim) {
+                            UsdShadeMaterial masterMaterial(masterPrim);
+                            subsetBindingAPI.Bind(masterMaterial);
+                        }
+                    }
                 }
             }
         }

@@ -10,15 +10,15 @@ BIM data exported from Navisworks produces heavily bloated USD stages: disconnec
 
 | Pass | Description | Default |
 |------|-------------|---------|
-| **Metadata Stripping** | Removes authored `customData`, empty arrays, None-valued attributes, and redundant subdivision defaults | On |
-| **Identity Xform Stripping** | Clears identity xformOps (transforms that compose to the identity matrix) | On |
-| **Vertex Welding** | Spatial-hash-based O(N) welding of coincident vertices with auto-epsilon detection | On |
-| **Degenerate Face Removal** | Removes faces with < 3 unique vertex indices (created by welding) | On |
-| **Lamina Face Removal** | Removes duplicate faces sharing identical vertex sets via canonical hash | On |
-| **Material Deduplication** | Deep SHA-256 hashing of shader networks; rebinds meshes to master materials | On |
-| **Geometric Instancing** | Replaces groups of identical meshes with `UsdGeomPointInstancer` prims | Off |
-| **Hierarchy Flattening** | Collapses single-child Xform chains, composing transforms bottom-up | Off |
-| **GPU Cache Optimization** | meshoptimizer-based vertex cache and fetch optimization | On |
+| **Metadata Stripping** | Removes authored `customData['userDocBrief']`, empty arrays, None-valued attributes (preserving time-sampled data), and redundant subdivision defaults | On |
+| **Identity Xform Stripping** | Clears identity xformOps (transforms that compose to the identity matrix), preserving animated transforms | On |
+| **Vertex Welding** | Spatial-hash-based O(N) welding of coincident vertices with auto-epsilon detection and bounds validation | On |
+| **Degenerate Face Removal** | Removes faces with < 3 unique vertex indices (created by welding), compacting faceVarying primvars | On |
+| **Lamina Face Removal** | Removes duplicate faces via canonical hash with secondary comparison to prevent false positives | On |
+| **Material Deduplication** | Deep SHA-256 hashing of shader networks; rebinds direct and per-face-subset material bindings | On |
+| **Geometric Instancing** | Replaces groups of identical meshes with `UsdGeomPointInstancer` prims, preserving material bindings | Off |
+| **Hierarchy Flattening** | Collapses single-child Xform chains, composing transforms bottom-up, preserving animated transforms | Off |
+| **GPU Cache Optimization** | meshoptimizer-based vertex cache and fetch optimization with full primvar remapping | On |
 
 ### Pass Ordering
 
@@ -74,7 +74,7 @@ cmake --build build --config Release
 Tests require USD and Python DLLs on PATH. Use the provided PowerShell scripts:
 
 ```powershell
-# Run all 32 tests
+# Run all 39 tests (11 suites)
 .\run_tests.ps1
 
 # Run a single test suite
@@ -153,7 +153,7 @@ src/
   bindings/       # Python bindings (boost::python)
 python/           # Python package (orchestration layer)
 tests/
-  cpp/            # Google Test unit and integration tests (32 tests, 10 suites)
+  cpp/            # Google Test unit and integration tests (39 tests, 11 suites)
   data/           # Test USD files
 cmake/            # CMake modules and USD dependency stubs
 ```
@@ -180,6 +180,30 @@ cmake/            # CMake modules and USD dependency stubs
 | `test_identity_xform` | 4 | Identity transform detection and clearing |
 | `test_instancing` | 3 | Geometry hashing, PointInstancer creation |
 | `test_hierarchy` | 4 | Single-child chain flattening, safety checks |
+| `test_regression_fixes` | 7 | Regression tests for Phase 1+2 bug fixes |
+
+## Correctness Guarantees
+
+The optimization passes include the following safety measures:
+
+- **Time-sampled data preservation**: All passes (MetadataStripper, IdentityXformStripper, HierarchyFlattener, PointInstancerAuthor) check for time-sampled attributes and skip animated data to prevent destroying animations.
+- **CustomData scoping**: MetadataStripper only removes `userDocBrief` from `customData` dictionaries, preserving other authored keys (BIM properties, user annotations).
+- **Face deduplication accuracy**: LaminaFaceRemover uses a two-level approach (hash + secondary index comparison) to prevent false-positive removal from hash collisions.
+- **Primvar consistency**: Face removal passes compact faceVarying and uniform primvars in lockstep with topology changes. GPU cache optimization remaps all vertex-interpolated primvars when reordering vertices.
+- **Index bounds validation**: VertexWelder validates all remapped indices against the new points array size, logging errors for out-of-bounds indices instead of producing corrupt geometry.
+- **Material binding preservation**: PointInstancerAuthor extracts and reapplies material bindings to prototypes. MaterialDeduplicator handles both direct and per-face-subset bindings.
+- **Concave polygon safety**: GpuCacheOptimizer detects n-gons (faces with >4 vertices) and skips meshes containing them to avoid incorrect fan triangulation.
+
+## Real BIM File Results
+
+Tested on 12 Navisworks USD files (1.6 GB total input):
+
+| Pipeline | Output Size | Reduction |
+|----------|-------------|-----------|
+| Default 7-pass | 1596.30 MB | 0.62% |
+| Full 9-pass | 1601.15 MB | 0.32% |
+
+The full pipeline produces slightly larger output than default because instancing adds PointInstancer overhead that outweighs savings for BIM data (where each element is geometrically unique). The primary value of the full pipeline is scene graph cleanliness and runtime performance (up to 124K intermediate Xform prims removed, 28K duplicate materials pruned).
 
 ## License
 

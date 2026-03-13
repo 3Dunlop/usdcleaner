@@ -1,0 +1,47 @@
+#usda 1.0
+(
+    defaultPrim = "Root"
+)
+
+def Xform "Root"
+{
+    # Has both userDocBrief AND other custom data — only userDocBrief should be removed
+    def Mesh "MixedCustomData" (
+        customData = {
+            string userDocBrief = "Wall Element 12345"
+            string bimCategory = "Walls"
+            int bimElementId = 12345
+            string author = "John Doe"
+        }
+    )
+    {
+        float3[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+    }
+
+    # Has ONLY userDocBrief — entire customData should be cleared
+    def Mesh "OnlyUserDocBrief" (
+        customData = {
+            string userDocBrief = "Floor Element 67890"
+        }
+    )
+    {
+        float3[] points = [(0, 0, 0), (2, 0, 0), (2, 0, 2), (0, 0, 2)]
+        int[] faceVertexCounts = [4]
+        int[] faceVertexIndices = [0, 1, 2, 3]
+    }
+
+    # Has no userDocBrief — should be untouched
+    def Mesh "NoUserDocBrief" (
+        customData = {
+            string bimCategory = "Doors"
+            int bimElementId = 99999
+        }
+    )
+    {
+        float3[] points = [(0, 0, 0), (1, 0, 0), (1, 2, 0)]
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+    }
+}

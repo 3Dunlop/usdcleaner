@@ -2,6 +2,9 @@
 
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/base/vt/value.h>
+#include <pxr/base/gf/vec2d.h>
+#include <pxr/base/gf/vec3d.h>
+#include <pxr/base/gf/vec4d.h>
 
 #include <iostream>
 
@@ -43,37 +46,44 @@ void PrimvarRemapper::RemapPrimvars(UsdGeomMesh& mesh,
         VtValue val;
         if (!pv.Get(&val)) continue;
 
-        // Handle common primvar types
-        if (val.IsHolding<VtVec3fArray>()) {
-            auto data = val.UncheckedGet<VtVec3fArray>();
-            if (data.size() == remap.size()) {
-                auto compacted = CompactVertexData(data, remap, newVertexCount);
-                pv.Set(compacted);
+        bool handled = false;
+
+        // Helper macro to reduce boilerplate for type dispatch
+        #define TRY_REMAP_TYPE(VtType) \
+            if (!handled && val.IsHolding<VtType>()) { \
+                auto data = val.UncheckedGet<VtType>(); \
+                if (data.size() == remap.size()) { \
+                    auto compacted = CompactVertexData(data, remap, newVertexCount); \
+                    pv.Set(compacted); \
+                } \
+                handled = true; \
             }
-        } else if (val.IsHolding<VtVec2fArray>()) {
-            auto data = val.UncheckedGet<VtVec2fArray>();
-            if (data.size() == remap.size()) {
-                auto compacted = CompactVertexData(data, remap, newVertexCount);
-                pv.Set(compacted);
-            }
-        } else if (val.IsHolding<VtFloatArray>()) {
-            auto data = val.UncheckedGet<VtFloatArray>();
-            if (data.size() == remap.size()) {
-                auto compacted = CompactVertexData(data, remap, newVertexCount);
-                pv.Set(compacted);
-            }
-        } else if (val.IsHolding<VtVec4fArray>()) {
-            auto data = val.UncheckedGet<VtVec4fArray>();
-            if (data.size() == remap.size()) {
-                auto compacted = CompactVertexData(data, remap, newVertexCount);
-                pv.Set(compacted);
-            }
+
+        // Float types (most common in BIM/rendering)
+        TRY_REMAP_TYPE(VtVec3fArray)
+        TRY_REMAP_TYPE(VtVec2fArray)
+        TRY_REMAP_TYPE(VtFloatArray)
+        TRY_REMAP_TYPE(VtArray<GfVec4f>)
+
+        // Integer types (element IDs, flags, etc.)
+        TRY_REMAP_TYPE(VtIntArray)
+
+        // Double-precision types (high-precision coordinates)
+        TRY_REMAP_TYPE(VtArray<GfVec3d>)
+        TRY_REMAP_TYPE(VtArray<GfVec2d>)
+        TRY_REMAP_TYPE(VtDoubleArray)
+        TRY_REMAP_TYPE(VtArray<GfVec4d>)
+
+        #undef TRY_REMAP_TYPE
+
+        if (!handled) {
+            std::cerr << "[PrimvarRemapper] Warning: unsupported vertex primvar type "
+                      << "on " << pv.GetName() << ", skipping remap\n";
         }
-        // faceVarying, uniform, constant primvars are left untouched
     }
 }
 
-// Explicit template instantiations
+// Explicit template instantiations for all supported types
 template VtVec3fArray PrimvarRemapper::CompactVertexData(
     const VtVec3fArray&, const RemapTable&, size_t);
 template VtVec2fArray PrimvarRemapper::CompactVertexData(
@@ -82,5 +92,15 @@ template VtFloatArray PrimvarRemapper::CompactVertexData(
     const VtFloatArray&, const RemapTable&, size_t);
 template VtArray<GfVec4f> PrimvarRemapper::CompactVertexData(
     const VtArray<GfVec4f>&, const RemapTable&, size_t);
+template VtIntArray PrimvarRemapper::CompactVertexData(
+    const VtIntArray&, const RemapTable&, size_t);
+template VtArray<GfVec3d> PrimvarRemapper::CompactVertexData(
+    const VtArray<GfVec3d>&, const RemapTable&, size_t);
+template VtArray<GfVec2d> PrimvarRemapper::CompactVertexData(
+    const VtArray<GfVec2d>&, const RemapTable&, size_t);
+template VtDoubleArray PrimvarRemapper::CompactVertexData(
+    const VtDoubleArray&, const RemapTable&, size_t);
+template VtArray<GfVec4d> PrimvarRemapper::CompactVertexData(
+    const VtArray<GfVec4d>&, const RemapTable&, size_t);
 
 } // namespace usdcleaner

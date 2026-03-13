@@ -7,8 +7,14 @@
 #include <pxr/usd/usdGeom/tokens.h>
 #include <pxr/base/gf/bbox3d.h>
 #include <pxr/base/gf/range3d.h>
+#include <pxr/base/gf/vec2d.h>
+#include <pxr/base/gf/vec3d.h>
+#include <pxr/base/gf/vec4d.h>
+#include <pxr/base/gf/vec4f.h>
+#include <pxr/base/vt/value.h>
 
 #include <algorithm>
+#include <iostream>
 #include <unordered_set>
 #include <cmath>
 
@@ -72,6 +78,62 @@ float ComputeAutoEpsilon(const UsdStageRefPtr& stage) {
     return std::max(epsilon, minEpsilon);
 }
 
+namespace {
+
+// Template helper to compact a faceVarying VtArray by removing entries
+// corresponding to removed faces.
+template<typename T>
+bool CompactFaceVaryingArray(const VtValue& original,
+                              const VtIntArray& faceVertexCounts,
+                              const std::vector<bool>& facesToKeep,
+                              VtValue& outCompacted) {
+    if (!original.IsHolding<VtArray<T>>()) return false;
+
+    const VtArray<T>& data = original.UncheckedGet<VtArray<T>>();
+    VtArray<T> compacted;
+    compacted.reserve(data.size());
+
+    size_t fvOffset = 0;
+    for (size_t faceIdx = 0; faceIdx < faceVertexCounts.size(); ++faceIdx) {
+        int count = faceVertexCounts[faceIdx];
+        if (facesToKeep[faceIdx]) {
+            for (int j = 0; j < count; ++j) {
+                if (fvOffset + j < data.size()) {
+                    compacted.push_back(data[fvOffset + j]);
+                }
+            }
+        }
+        fvOffset += count;
+    }
+
+    outCompacted = VtValue(compacted);
+    return true;
+}
+
+// Try to compact a faceVarying primvar value across all supported types.
+VtValue CompactFaceVaryingValue(const VtValue& original,
+                                 const VtIntArray& faceVertexCounts,
+                                 const std::vector<bool>& facesToKeep) {
+    VtValue result;
+
+    if (CompactFaceVaryingArray<GfVec2f>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<GfVec3f>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<GfVec4f>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<float>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<int>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<GfVec2d>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<GfVec3d>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<double>(original, faceVertexCounts, facesToKeep, result)) return result;
+    if (CompactFaceVaryingArray<GfVec4d>(original, faceVertexCounts, facesToKeep, result)) return result;
+
+    // Unsupported type — log warning
+    std::cerr << "[RemoveFaces] Warning: unsupported faceVarying primvar type, "
+              << "skipping compaction\n";
+    return original;
+}
+
+} // anonymous namespace
+
 void RemoveFaces(UsdGeomMesh& mesh, const std::vector<bool>& facesToKeep) {
     VtIntArray faceVertexCounts, faceVertexIndices;
     mesh.GetFaceVertexCountsAttr().Get(&faceVertexCounts);
@@ -79,20 +141,13 @@ void RemoveFaces(UsdGeomMesh& mesh, const std::vector<bool>& facesToKeep) {
 
     if (faceVertexCounts.empty()) return;
 
-    VtIntArray newCounts;
-    VtIntArray newIndices;
-    newCounts.reserve(faceVertexCounts.size());
-    newIndices.reserve(faceVertexIndices.size());
-
-    // Also handle faceVarying primvars
+    // Collect faceVarying primvar data BEFORE modifying topology
     UsdGeomPrimvarsAPI primvarsAPI(mesh);
     auto primvars = primvarsAPI.GetPrimvars();
 
-    // Collect faceVarying primvar data
     struct FaceVaryingPrimvar {
         UsdGeomPrimvar primvar;
         VtValue originalData;
-        VtValue newData;
     };
     std::vector<FaceVaryingPrimvar> fvPrimvars;
 
@@ -100,10 +155,32 @@ void RemoveFaces(UsdGeomMesh& mesh, const std::vector<bool>& facesToKeep) {
         if (pv.GetInterpolation() == UsdGeomTokens->faceVarying) {
             VtValue val;
             if (pv.Get(&val)) {
-                fvPrimvars.push_back({pv, val, VtValue()});
+                fvPrimvars.push_back({pv, val});
             }
         }
     }
+
+    // Also collect uniform (per-face) primvars
+    struct UniformPrimvar {
+        UsdGeomPrimvar primvar;
+        VtValue originalData;
+    };
+    std::vector<UniformPrimvar> uniformPrimvars;
+
+    for (auto& pv : primvars) {
+        if (pv.GetInterpolation() == UsdGeomTokens->uniform) {
+            VtValue val;
+            if (pv.Get(&val)) {
+                uniformPrimvars.push_back({pv, val});
+            }
+        }
+    }
+
+    // Build new counts and indices
+    VtIntArray newCounts;
+    VtIntArray newIndices;
+    newCounts.reserve(faceVertexCounts.size());
+    newIndices.reserve(faceVertexIndices.size());
 
     size_t fvOffset = 0;
     for (size_t faceIdx = 0; faceIdx < faceVertexCounts.size(); ++faceIdx) {
@@ -115,15 +192,54 @@ void RemoveFaces(UsdGeomMesh& mesh, const std::vector<bool>& facesToKeep) {
                 newIndices.push_back(faceVertexIndices[fvOffset + j]);
             }
         }
-        // Note: faceVarying primvar compaction would need type-specific
-        // handling here (VtVec2fArray, VtVec3fArray, etc.)
-        // This is handled in the full implementation via templated helpers.
 
         fvOffset += count;
     }
 
     mesh.GetFaceVertexCountsAttr().Set(newCounts);
     mesh.GetFaceVertexIndicesAttr().Set(newIndices);
+
+    // Compact faceVarying primvars to match new topology
+    for (auto& fvp : fvPrimvars) {
+        VtValue compacted = CompactFaceVaryingValue(
+            fvp.originalData, faceVertexCounts, facesToKeep);
+        fvp.primvar.Set(compacted);
+    }
+
+    // Compact uniform (per-face) primvars — one entry per face
+    for (auto& up : uniformPrimvars) {
+        VtValue val = up.originalData;
+
+        auto compactUniform = [&](auto tag) -> bool {
+            using T = decltype(tag);
+            if (!val.IsHolding<VtArray<T>>()) return false;
+            const auto& arr = val.UncheckedGet<VtArray<T>>();
+            VtArray<T> compacted;
+            compacted.reserve(arr.size());
+            for (size_t i = 0; i < arr.size() && i < facesToKeep.size(); ++i) {
+                if (facesToKeep[i]) {
+                    compacted.push_back(arr[i]);
+                }
+            }
+            up.primvar.Set(VtValue(compacted));
+            return true;
+        };
+
+        bool handled = false;
+        handled = handled || compactUniform(float{});
+        handled = handled || compactUniform(int{});
+        handled = handled || compactUniform(GfVec2f{});
+        handled = handled || compactUniform(GfVec3f{});
+        handled = handled || compactUniform(GfVec4f{});
+        handled = handled || compactUniform(double{});
+        handled = handled || compactUniform(GfVec2d{});
+        handled = handled || compactUniform(GfVec3d{});
+
+        if (!handled) {
+            std::cerr << "[RemoveFaces] Warning: unsupported uniform primvar type, "
+                      << "skipping compaction\n";
+        }
+    }
 }
 
 void CompactUnreferencedVertices(VtVec3fArray& points,
@@ -157,7 +273,10 @@ void CompactUnreferencedVertices(VtVec3fArray& points,
 
     // Update indices
     for (size_t i = 0; i < faceVertexIndices.size(); ++i) {
-        faceVertexIndices[i] = compactMap[faceVertexIndices[i]];
+        int idx = faceVertexIndices[i];
+        if (idx >= 0 && static_cast<size_t>(idx) < compactMap.size()) {
+            faceVertexIndices[i] = compactMap[idx];
+        }
     }
 
     points = std::move(newPoints);

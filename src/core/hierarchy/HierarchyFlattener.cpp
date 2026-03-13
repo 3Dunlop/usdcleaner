@@ -113,6 +113,18 @@ bool HierarchyFlattener::IsSafeToFlatten(const UsdPrim& prim) const {
         }
     }
 
+    // Has time-sampled xformOps -> preserve (flattening would bake to one frame)
+    {
+        UsdGeomXformable xformable(prim);
+        bool resetsStack = false;
+        auto ops = xformable.GetOrderedXformOps(&resetsStack);
+        for (const auto& op : ops) {
+            if (op.GetAttr().GetNumTimeSamples() > 0) {
+                return false;
+            }
+        }
+    }
+
     // Has authored composition arcs -> preserve
     if (prim.HasAuthoredReferences() ||
         prim.HasAuthoredInherits() ||
@@ -207,6 +219,21 @@ void HierarchyFlattener::Execute(const UsdStageRefPtr& stage) {
             if (!IsNearIdentity(parentXform) && child.IsA<UsdGeomXformable>()) {
                 UsdGeomXformable childXformable(child);
                 bool childResetsStack = false;
+
+                // Skip if child has time-sampled xformOps — composing would
+                // bake animated transforms to a single frame
+                auto childOpsCheck = childXformable.GetOrderedXformOps(&childResetsStack);
+                bool childHasTimeSamples = false;
+                for (const auto& op : childOpsCheck) {
+                    if (op.GetAttr().GetNumTimeSamples() > 0) {
+                        childHasTimeSamples = true;
+                        break;
+                    }
+                }
+                if (childHasTimeSamples) {
+                    continue; // Skip this candidate entirely
+                }
+
                 GfMatrix4d childXform(1.0);
                 childXformable.GetLocalTransformation(&childXform, &childResetsStack,
                                                        UsdTimeCode::Default());
