@@ -17,6 +17,28 @@ HashDigest MaterialHasher::HashMaterial(const UsdShadeMaterial& material) {
     // since duplicates will have different paths)
     hasher.Update("MATERIAL");
 
+    // Hash material interface inputs — these are values authored directly on
+    // the Material prim (e.g., inputs:baseColor, inputs:specularEdgeColor).
+    // In FBX-exported USD, the actual color values live here while shaders
+    // only have connections back to them. Without hashing these, materials
+    // with different colors but the same shader topology hash identically.
+    {
+        auto matInputs = material.GetInputs();
+        std::sort(matInputs.begin(), matInputs.end(),
+                  [](const UsdShadeInput& a, const UsdShadeInput& b) {
+                      return a.GetBaseName() < b.GetBaseName();
+                  });
+
+        for (const auto& input : matInputs) {
+            hasher.Update("MAT_INPUT:");
+            hasher.Update(input.GetBaseName().GetString());
+            VtValue val;
+            if (input.Get(&val)) {
+                HashInputValue(val, hasher);
+            }
+        }
+    }
+
     // Iterate all shader prims under this material, sorted by relative path
     // for deterministic hashing
     std::vector<UsdShadeShader> shaders;

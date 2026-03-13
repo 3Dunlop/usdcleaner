@@ -238,8 +238,39 @@ void PointInstancerAuthor::Execute(const UsdStageRefPtr& stage) {
             continue;
         }
 
-        // Copy prototype mesh under instancer
-        SdfPath protoPath = instancerPath.AppendChild(TfToken("proto_0"));
+        // Copy prototype mesh under instancer, using a descriptive name
+        // derived from the source mesh or its parent Xform
+        std::string protoName = "proto_0";
+        {
+            UsdPrim firstMeshPrim = stage->GetPrimAtPath(paths[0]);
+            if (firstMeshPrim.IsValid()) {
+                std::string meshName = firstMeshPrim.GetName().GetString();
+                // If the mesh is just called "Mesh", use the parent name instead
+                if (meshName == "Mesh" || meshName == "mesh") {
+                    UsdPrim parent = firstMeshPrim.GetParent();
+                    if (parent.IsValid() && parent != stage->GetPseudoRoot()) {
+                        protoName = parent.GetName().GetString();
+                    }
+                } else {
+                    protoName = meshName;
+                }
+                // Sanitize: USD prim names must start with letter/underscore
+                if (!protoName.empty() && !std::isalpha(protoName[0]) && protoName[0] != '_') {
+                    protoName = "_" + protoName;
+                }
+            }
+        }
+        SdfPath protoPath = instancerPath.AppendChild(TfToken(protoName));
+        // Handle prototype name collision
+        if (stage->GetPrimAtPath(protoPath).IsValid()) {
+            int suffix = 1;
+            while (stage->GetPrimAtPath(
+                instancerPath.AppendChild(TfToken(protoName + "_" + std::to_string(suffix)))).IsValid()) {
+                suffix++;
+            }
+            protoName = protoName + "_" + std::to_string(suffix);
+            protoPath = instancerPath.AppendChild(TfToken(protoName));
+        }
         SdfCopySpec(stage->GetRootLayer(), paths[0], stage->GetRootLayer(), protoPath);
 
         // Clear prototype's transform (positions are in the instancer)

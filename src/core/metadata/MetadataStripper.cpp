@@ -9,6 +9,9 @@
 #include <pxr/usd/sdf/primSpec.h>
 #include <pxr/usd/sdf/schema.h>
 #include <pxr/usd/usdGeom/mesh.h>
+#include <pxr/usd/usdShade/shader.h>
+#include <pxr/usd/usdShade/material.h>
+#include <pxr/usd/usdShade/nodeGraph.h>
 #include <pxr/base/vt/value.h>
 #include <pxr/base/vt/dictionary.h>
 #include <pxr/base/tf/token.h>
@@ -55,10 +58,29 @@ void MetadataStripper::Execute(const UsdStageRefPtr& stage) {
         }
 
         // 2. Check None-valued and empty-array authored properties
+        // Determine if this prim is a UsdShade type — its properties need
+        // special handling since inputs/outputs are connection endpoints
+        // where Get() returns false but the property is essential.
+        bool isShadeType = prim.IsA<UsdShadeShader>() ||
+                           prim.IsA<UsdShadeMaterial>() ||
+                           prim.IsA<UsdShadeNodeGraph>();
+
         for (const UsdProperty& prop : prim.GetAuthoredProperties()) {
             UsdAttribute attr = prim.GetAttribute(prop.GetName());
             if (!attr || !attr.IsAuthored()) {
                 continue;
+            }
+
+            // Never strip UsdShade inputs/outputs — these are connection
+            // endpoints (e.g., outputs:surface, inputs:diffuseColor.connect)
+            // where Get() returns false but the property is essential for
+            // material rendering. Also skip any property with connections.
+            if (isShadeType) {
+                std::string propName = prop.GetName().GetString();
+                if (propName.find("inputs:") == 0 ||
+                    propName.find("outputs:") == 0) {
+                    continue;
+                }
             }
 
             VtValue val;
@@ -68,7 +90,12 @@ void MetadataStripper::Execute(const UsdStageRefPtr& stage) {
                 if (attr.GetNumTimeSamples() > 0) {
                     continue;
                 }
-                // Truly empty — no default value and no time samples
+                // Skip attributes that have connections (UsdShade connection
+                // targets where the value comes from the connected source)
+                if (attr.HasAuthoredConnections()) {
+                    continue;
+                }
+                // Truly empty — no default value, no time samples, no connections
                 mods.propsToRemove.push_back(prop.GetName());
                 continue;
             }

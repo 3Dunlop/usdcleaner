@@ -10,13 +10,13 @@ BIM data exported from Navisworks produces heavily bloated USD stages: disconnec
 
 | Pass | Description | Default |
 |------|-------------|---------|
-| **Metadata Stripping** | Removes authored `customData['userDocBrief']`, empty arrays, None-valued attributes (preserving time-sampled data), and redundant subdivision defaults | On |
+| **Metadata Stripping** | Removes authored `customData['userDocBrief']`, empty arrays, None-valued attributes (preserving time-sampled data and UsdShade connections), and redundant subdivision defaults | On |
 | **Identity Xform Stripping** | Clears identity xformOps (transforms that compose to the identity matrix), preserving animated transforms | On |
 | **Vertex Welding** | Spatial-hash-based O(N) welding of coincident vertices with auto-epsilon detection and bounds validation | On |
 | **Degenerate Face Removal** | Removes faces with < 3 unique vertex indices (created by welding), compacting faceVarying primvars | On |
 | **Lamina Face Removal** | Removes duplicate faces via canonical hash with secondary comparison to prevent false positives | On |
-| **Material Deduplication** | Deep SHA-256 hashing of shader networks; rebinds direct and per-face-subset material bindings | On |
-| **Geometric Instancing** | Replaces groups of identical meshes with `UsdGeomPointInstancer` prims, preserving material bindings | Off |
+| **Material Deduplication** | Deep SHA-256 hashing of full shader networks including material interface inputs; rebinds direct and per-face-subset material bindings | On |
+| **Geometric Instancing** | Replaces groups of identical meshes with `UsdGeomPointInstancer` prims with descriptive prototype names, preserving material bindings | Off |
 | **Hierarchy Flattening** | Collapses single-child Xform chains, composing transforms bottom-up, preserving animated transforms | Off |
 | **GPU Cache Optimization** | meshoptimizer-based vertex cache and fetch optimization with full primvar remapping | On |
 
@@ -74,7 +74,7 @@ cmake --build build --config Release
 Tests require USD and Python DLLs on PATH. Use the provided PowerShell scripts:
 
 ```powershell
-# Run all 39 tests (11 suites)
+# Run all 42 tests (11 suites)
 .\run_tests.ps1
 
 # Run a single test suite
@@ -153,7 +153,7 @@ src/
   bindings/       # Python bindings (boost::python)
 python/           # Python package (orchestration layer)
 tests/
-  cpp/            # Google Test unit and integration tests (39 tests, 11 suites)
+  cpp/            # Google Test unit and integration tests (42 tests, 11 suites)
   data/           # Test USD files
 cmake/            # CMake modules and USD dependency stubs
 ```
@@ -180,7 +180,7 @@ cmake/            # CMake modules and USD dependency stubs
 | `test_identity_xform` | 4 | Identity transform detection and clearing |
 | `test_instancing` | 3 | Geometry hashing, PointInstancer creation |
 | `test_hierarchy` | 4 | Single-child chain flattening, safety checks |
-| `test_regression_fixes` | 7 | Regression tests for Phase 1+2 bug fixes |
+| `test_regression_fixes` | 10 | Regression tests for v3 bug fixes + v4 material fixes |
 
 ## Correctness Guarantees
 
@@ -188,22 +188,36 @@ The optimization passes include the following safety measures:
 
 - **Time-sampled data preservation**: All passes (MetadataStripper, IdentityXformStripper, HierarchyFlattener, PointInstancerAuthor) check for time-sampled attributes and skip animated data to prevent destroying animations.
 - **CustomData scoping**: MetadataStripper only removes `userDocBrief` from `customData` dictionaries, preserving other authored keys (BIM properties, user annotations).
+- **UsdShade connection safety**: MetadataStripper skips all inputs/outputs on Shader, Material, and NodeGraph prims, and any attribute with authored connections — preventing destruction of material surface connections and color values.
+- **Material interface hashing**: MaterialHasher includes material-level interface inputs (`inputs:baseColor`, etc.) in the SHA-256 hash, not just shader-level inputs — correctly differentiating materials that share the same shader topology but have different colors/values.
 - **Face deduplication accuracy**: LaminaFaceRemover uses a two-level approach (hash + secondary index comparison) to prevent false-positive removal from hash collisions.
 - **Primvar consistency**: Face removal passes compact faceVarying and uniform primvars in lockstep with topology changes. GPU cache optimization remaps all vertex-interpolated primvars when reordering vertices.
 - **Index bounds validation**: VertexWelder validates all remapped indices against the new points array size, logging errors for out-of-bounds indices instead of producing corrupt geometry.
 - **Material binding preservation**: PointInstancerAuthor extracts and reapplies material bindings to prototypes. MaterialDeduplicator handles both direct and per-face-subset bindings.
+- **Descriptive prototype naming**: PointInstancerAuthor derives prototype names from source mesh/parent names (e.g., `proto_WallPanel`) instead of generic `proto_0` numbering.
 - **Concave polygon safety**: GpuCacheOptimizer detects n-gons (faces with >4 vertices) and skips meshes containing them to avoid incorrect fan triangulation.
 
 ## Real BIM File Results
 
-Tested on 12 Navisworks USD files (1.6 GB total input):
+Tested on 12 Navisworks USD files (1,606 MB total input) with the full 9-pass pipeline:
 
-| Pipeline | Output Size | Reduction |
-|----------|-------------|-----------|
-| Default 7-pass | 1596.30 MB | 0.62% |
-| Full 9-pass | 1601.15 MB | 0.32% |
+| File | Input | Output | Materials In → Out | Time |
+|------|-------|--------|-------------------|------|
+| CIV-50001 | 0.25 MB | 0.41 MB | 13 → 5 | 0.1s |
+| CIV-50002 | 10.09 MB | 10.03 MB | 310 → 5 | 1.0s |
+| STR-50002 | 10.29 MB | 9.96 MB | 3,523 → 2 | 4.8s |
+| ARC-50001 | 97.59 MB | 97.28 MB | 7,129 → 83 | 19.2s |
+| ARC-50002 | 16.25 MB | 15.74 MB | 3,352 → 29 | 5.4s |
+| FAC-50003 | 690.16 MB | 689.08 MB | 6,424 → 33 | 45.9s |
+| FCT-50001 | 2.89 MB | 2.89 MB | 129 → 2 | 0.6s |
+| RND-INT | 713.90 MB | 710.62 MB | 28,319 → 81 | 119.3s |
+| LSE-50001 | 22.56 MB | 22.51 MB | 877 → 26 | 2.5s |
+| LSE-50002 | 5.65 MB | 5.74 MB | 2,079 → 7 | 1.7s |
+| WFT-50001 | 30.04 MB | 30.24 MB | 1,360 → 4 | 4.7s |
+| SGN-50001 | 6.58 MB | 6.70 MB | 111 → 6 | 2.0s |
+| **Total** | **1,606 MB** | **1,601 MB** | **53,626 → 283** | **207s** |
 
-The full pipeline produces slightly larger output than default because instancing adds PointInstancer overhead that outweighs savings for BIM data (where each element is geometrically unique). The primary value of the full pipeline is scene graph cleanliness and runtime performance (up to 124K intermediate Xform prims removed, 28K duplicate materials pruned).
+Material deduplication is the primary win: 53,626 materials reduced to 283 unique materials across all files. File size reduction is modest (0.31%) because BIM geometry is already dense and each element tends to be geometrically unique — the main value is scene graph cleanliness and runtime performance (124K intermediate Xform prims removed, duplicate materials pruned by 99.5%).
 
 ## License
 

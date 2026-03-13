@@ -6,6 +6,8 @@
 #include "core/topology/LaminaFaceRemover.h"
 #include "core/topology/DegenerateFaceRemover.h"
 #include "core/welding/VertexWelder.h"
+#include "core/materials/MaterialHasher.h"
+#include "core/materials/MaterialDeduplicator.h"
 #include "core/common/UsdUtils.h"
 
 #include <pxr/usd/usd/stage.h>
@@ -17,6 +19,9 @@
 #include <pxr/usd/usdGeom/xformable.h>
 #include <pxr/usd/usdGeom/primvarsAPI.h>
 #include <pxr/usd/usdGeom/tokens.h>
+#include <pxr/usd/usdShade/material.h>
+#include <pxr/usd/usdShade/shader.h>
+#include <pxr/usd/usdShade/materialBindingAPI.h>
 #include <pxr/base/vt/dictionary.h>
 
 using namespace usdcleaner;
@@ -328,4 +333,204 @@ TEST_F(RegressionTest, MetadataStripper_PreservesTimeSampledAttributes) {
     EXPECT_TRUE(attrAfter.IsAuthored())
         << "Time-sampled attribute should NOT be removed as 'None-valued'";
     EXPECT_GT(attrAfter.GetNumTimeSamples(), 0u);
+}
+
+// =============================================================================
+// Bug #13 Regression: MetadataStripper must preserve UsdShade material properties
+// =============================================================================
+
+TEST_F(RegressionTest, MetadataStripper_PreservesShadeProperties) {
+    // Create a stage with a material that has interface inputs and shader
+    // connections — the pattern used by FBX-exported USD files
+    auto stage = UsdStage::CreateInMemory();
+
+    // Create material with interface inputs
+    auto material = UsdShadeMaterial::Define(stage,
+        SdfPath("/Root/Materials/TestMaterial"));
+
+    // Add interface inputs on the material prim (like FBX exporter does)
+    auto baseColorInput = material.CreateInput(TfToken("baseColor"),
+        SdfValueTypeNames->Color3f);
+    baseColorInput.Set(GfVec3f(0.8f, 0.2f, 0.1f));
+
+    // Add surface output connection
+    auto surfaceOutput = material.CreateSurfaceOutput();
+
+    // Create shader under material
+    auto shader = UsdShadeShader::Define(stage,
+        SdfPath("/Root/Materials/TestMaterial/Shader"));
+    shader.CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+
+    // Connect shader input to material interface input
+    auto shaderDiffuse = shader.CreateInput(TfToken("diffuseColor"),
+        SdfValueTypeNames->Color3f);
+    shaderDiffuse.ConnectToSource(baseColorInput);
+
+    // Create shader outputs
+    auto shaderSurfaceOut = shader.CreateOutput(TfToken("surface"),
+        SdfValueTypeNames->Token);
+    surfaceOutput.ConnectToSource(shaderSurfaceOut);
+
+    // Create a mesh bound to this material
+    auto mesh = UsdGeomMesh::Define(stage, SdfPath("/Root/Mesh"));
+    VtVec3fArray points = {GfVec3f(0,0,0), GfVec3f(1,0,0), GfVec3f(1,1,0)};
+    VtIntArray counts = {3};
+    VtIntArray indices = {0, 1, 2};
+    mesh.GetPointsAttr().Set(points);
+    mesh.GetFaceVertexCountsAttr().Set(counts);
+    mesh.GetFaceVertexIndicesAttr().Set(indices);
+
+    UsdShadeMaterialBindingAPI::Apply(mesh.GetPrim());
+    UsdShadeMaterialBindingAPI(mesh.GetPrim()).Bind(material);
+
+    // Run MetadataStripper
+    MetadataStripper stripper;
+    stripper.Execute(stage);
+
+    // Verify material interface input preserved
+    auto matPrim = stage->GetPrimAtPath(SdfPath("/Root/Materials/TestMaterial"));
+    ASSERT_TRUE(matPrim.IsValid());
+    UsdShadeMaterial matAfter(matPrim);
+    auto baseColorAfter = matAfter.GetInput(TfToken("baseColor"));
+    ASSERT_TRUE(baseColorAfter);
+    GfVec3f colorVal;
+    EXPECT_TRUE(baseColorAfter.Get(&colorVal))
+        << "Material interface input 'baseColor' should be preserved";
+    EXPECT_EQ(colorVal, GfVec3f(0.8f, 0.2f, 0.1f));
+
+    // Verify surface output connection preserved
+    auto surfOutAfter = matAfter.GetSurfaceOutput();
+    EXPECT_TRUE(surfOutAfter.HasConnectedSource())
+        << "Material surface output connection should be preserved";
+
+    // Verify shader output preserved
+    auto shaderPrim = stage->GetPrimAtPath(
+        SdfPath("/Root/Materials/TestMaterial/Shader"));
+    ASSERT_TRUE(shaderPrim.IsValid());
+    UsdShadeShader shaderAfter(shaderPrim);
+    auto shaderSurfOutAfter = shaderAfter.GetOutput(TfToken("surface"));
+    EXPECT_TRUE(shaderSurfOutAfter)
+        << "Shader 'outputs:surface' should be preserved";
+
+    // Verify shader input connection preserved
+    auto diffuseAfter = shaderAfter.GetInput(TfToken("diffuseColor"));
+    EXPECT_TRUE(diffuseAfter)
+        << "Shader 'inputs:diffuseColor' should be preserved";
+    EXPECT_TRUE(diffuseAfter.HasConnectedSource())
+        << "Shader input connection should be preserved";
+}
+
+// =============================================================================
+// Bug #14 Regression: MaterialHasher must differentiate interface input values
+// =============================================================================
+
+TEST_F(RegressionTest, MaterialHasher_DifferentiatesInterfaceInputs) {
+    // Create a stage with two materials that have the same shader structure
+    // but different interface input values (like FBX-exported colors)
+    auto stage = UsdStage::CreateInMemory();
+
+    // Material A: red
+    auto matA = UsdShadeMaterial::Define(stage, SdfPath("/Root/Materials/MatA"));
+    matA.CreateInput(TfToken("baseColor"), SdfValueTypeNames->Color3f)
+        .Set(GfVec3f(1.0f, 0.0f, 0.0f));
+    auto shaderA = UsdShadeShader::Define(stage,
+        SdfPath("/Root/Materials/MatA/Shader"));
+    shaderA.CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+    shaderA.CreateInput(TfToken("diffuseColor"), SdfValueTypeNames->Color3f)
+        .ConnectToSource(matA.GetInput(TfToken("baseColor")));
+
+    // Material B: blue (different color, same shader topology)
+    auto matB = UsdShadeMaterial::Define(stage, SdfPath("/Root/Materials/MatB"));
+    matB.CreateInput(TfToken("baseColor"), SdfValueTypeNames->Color3f)
+        .Set(GfVec3f(0.0f, 0.0f, 1.0f));
+    auto shaderB = UsdShadeShader::Define(stage,
+        SdfPath("/Root/Materials/MatB/Shader"));
+    shaderB.CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+    shaderB.CreateInput(TfToken("diffuseColor"), SdfValueTypeNames->Color3f)
+        .ConnectToSource(matB.GetInput(TfToken("baseColor")));
+
+    // Material C: also red (duplicate of A)
+    auto matC = UsdShadeMaterial::Define(stage, SdfPath("/Root/Materials/MatC"));
+    matC.CreateInput(TfToken("baseColor"), SdfValueTypeNames->Color3f)
+        .Set(GfVec3f(1.0f, 0.0f, 0.0f));
+    auto shaderC = UsdShadeShader::Define(stage,
+        SdfPath("/Root/Materials/MatC/Shader"));
+    shaderC.CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+    shaderC.CreateInput(TfToken("diffuseColor"), SdfValueTypeNames->Color3f)
+        .ConnectToSource(matC.GetInput(TfToken("baseColor")));
+
+    // Hash all three materials
+    MaterialHasher hasher;
+    HashDigest hashA = hasher.HashMaterial(matA);
+    HashDigest hashB = hasher.HashMaterial(matB);
+    HashDigest hashC = hasher.HashMaterial(matC);
+
+    // A and C should hash identically (same color, same structure)
+    EXPECT_EQ(hashA, hashC)
+        << "Materials with identical interface inputs should hash the same";
+
+    // A and B should hash DIFFERENTLY (different colors)
+    EXPECT_NE(hashA, hashB)
+        << "Materials with different interface input values must hash differently";
+}
+
+// =============================================================================
+// Bug #13+14 Combined: MaterialDeduplicator preserves distinct materials
+// =============================================================================
+
+TEST_F(RegressionTest, MaterialDeduplicator_PreservesDistinctMaterials) {
+    auto stage = UsdStage::CreateInMemory();
+
+    // Create two materials with different colors
+    auto matRed = UsdShadeMaterial::Define(stage, SdfPath("/Root/Materials/Red"));
+    matRed.CreateInput(TfToken("baseColor"), SdfValueTypeNames->Color3f)
+        .Set(GfVec3f(1.0f, 0.0f, 0.0f));
+    auto shaderRed = UsdShadeShader::Define(stage,
+        SdfPath("/Root/Materials/Red/Shader"));
+    shaderRed.CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+    shaderRed.CreateInput(TfToken("diffuseColor"), SdfValueTypeNames->Color3f)
+        .ConnectToSource(matRed.GetInput(TfToken("baseColor")));
+
+    auto matBlue = UsdShadeMaterial::Define(stage, SdfPath("/Root/Materials/Blue"));
+    matBlue.CreateInput(TfToken("baseColor"), SdfValueTypeNames->Color3f)
+        .Set(GfVec3f(0.0f, 0.0f, 1.0f));
+    auto shaderBlue = UsdShadeShader::Define(stage,
+        SdfPath("/Root/Materials/Blue/Shader"));
+    shaderBlue.CreateIdAttr(VtValue(TfToken("UsdPreviewSurface")));
+    shaderBlue.CreateInput(TfToken("diffuseColor"), SdfValueTypeNames->Color3f)
+        .ConnectToSource(matBlue.GetInput(TfToken("baseColor")));
+
+    // Create two meshes, each bound to a different material
+    auto meshA = UsdGeomMesh::Define(stage, SdfPath("/Root/MeshA"));
+    meshA.GetPointsAttr().Set(VtVec3fArray{GfVec3f(0,0,0), GfVec3f(1,0,0), GfVec3f(1,1,0)});
+    meshA.GetFaceVertexCountsAttr().Set(VtIntArray{3});
+    meshA.GetFaceVertexIndicesAttr().Set(VtIntArray{0, 1, 2});
+    UsdShadeMaterialBindingAPI::Apply(meshA.GetPrim());
+    UsdShadeMaterialBindingAPI(meshA.GetPrim()).Bind(matRed);
+
+    auto meshB = UsdGeomMesh::Define(stage, SdfPath("/Root/MeshB"));
+    meshB.GetPointsAttr().Set(VtVec3fArray{GfVec3f(2,0,0), GfVec3f(3,0,0), GfVec3f(3,1,0)});
+    meshB.GetFaceVertexCountsAttr().Set(VtIntArray{3});
+    meshB.GetFaceVertexIndicesAttr().Set(VtIntArray{0, 1, 2});
+    UsdShadeMaterialBindingAPI::Apply(meshB.GetPrim());
+    UsdShadeMaterialBindingAPI(meshB.GetPrim()).Bind(matBlue);
+
+    // Run MaterialDeduplicator
+    MaterialDeduplicator dedup;
+    dedup.Execute(stage);
+
+    // Both materials should still exist (different colors!)
+    EXPECT_TRUE(stage->GetPrimAtPath(SdfPath("/Root/Materials/Red")).IsValid())
+        << "Red material should not be pruned";
+    EXPECT_TRUE(stage->GetPrimAtPath(SdfPath("/Root/Materials/Blue")).IsValid())
+        << "Blue material should not be pruned";
+
+    // Mesh bindings should be unchanged
+    UsdShadeMaterialBindingAPI bindA(stage->GetPrimAtPath(SdfPath("/Root/MeshA")));
+    auto boundA = bindA.ComputeBoundMaterial();
+    EXPECT_EQ(boundA.GetPrim().GetPath(), SdfPath("/Root/Materials/Red"));
+
+    UsdShadeMaterialBindingAPI bindB(stage->GetPrimAtPath(SdfPath("/Root/MeshB")));
+    auto boundB = bindB.ComputeBoundMaterial();
+    EXPECT_EQ(boundB.GetPrim().GetPath(), SdfPath("/Root/Materials/Blue"));
 }
