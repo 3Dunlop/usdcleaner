@@ -1,4 +1,5 @@
 #include "core/pipeline/StageProcessor.h"
+#include "core/import/FbxImportFixup.h"
 #include "core/metadata/MetadataStripper.h"
 #include "core/metadata/IdentityXformStripper.h"
 #include "core/welding/VertexWelder.h"
@@ -10,6 +11,7 @@
 #include "core/cache/GpuCacheOptimizer.h"
 
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/usd/flattenUtils.h>
 #include <pxr/usd/sdf/layer.h>
 
 #include <iostream>
@@ -84,14 +86,44 @@ bool StageProcessor::Process(const std::string& inputPath,
                               const std::string& outputPath) {
     std::cout << "[StageProcessor] Loading: " << inputPath << "\n";
 
-    // Open the stage
-    UsdStageRefPtr stage = UsdStage::Open(inputPath);
-    if (!stage) {
-        std::cerr << "[StageProcessor] Error: failed to open " << inputPath << "\n";
-        return false;
-    }
+    // Detect FBX input
+    std::string inputExt = std::filesystem::path(inputPath).extension().string();
+    bool isFbx = (inputExt == ".fbx" || inputExt == ".FBX");
 
-    std::cout << "[StageProcessor] Stage loaded successfully\n";
+    UsdStageRefPtr stage;
+
+    if (isFbx) {
+        // FBX files are opened via the usdFBX SdfFileFormat plugin, which provides
+        // a read-only layer.  We flatten the stage into a new anonymous writable
+        // layer so that all optimization passes can mutate it freely.
+        auto fbxStage = UsdStage::Open(inputPath);
+        if (!fbxStage) {
+            std::cerr << "[StageProcessor] Error: Cannot open FBX file '" << inputPath << "'.\n"
+                      << "  Ensure USDCleaner was built with -DUSDCLEANER_BUILD_FBX_PLUGIN=ON\n"
+                      << "  and that the FBX SDK is installed.\n";
+            return false;
+        }
+
+        std::cout << "[StageProcessor] FBX stage loaded, flattening to writable layer...\n";
+        auto flatLayer = fbxStage->Flatten();
+        stage = UsdStage::Open(flatLayer);
+        if (!stage) {
+            std::cerr << "[StageProcessor] Error: failed to create writable stage from FBX\n";
+            return false;
+        }
+        std::cout << "[StageProcessor] Writable stage ready\n";
+
+        // Insert BIM fixup pass at the beginning of the pipeline
+        auto fixup = std::make_shared<FbxImportFixup>(config_.fbxUpAxis, config_.fbxUnitScale);
+        pipeline_.InsertPass(0, fixup);
+    } else {
+        stage = UsdStage::Open(inputPath);
+        if (!stage) {
+            std::cerr << "[StageProcessor] Error: failed to open " << inputPath << "\n";
+            return false;
+        }
+        std::cout << "[StageProcessor] Stage loaded successfully\n";
+    }
 
     // Run the pipeline
     pipeline_.Execute(stage);

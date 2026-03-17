@@ -49,6 +49,11 @@ else()
     )
 endif()
 
+# ---- FBX SDK (optional, for usdFBX plugin) ----
+if(USDCLEANER_BUILD_FBX_PLUGIN)
+    include(FindFBXSDK)
+endif()
+
 # ---- vcpkg dependencies ----
 find_package(meshoptimizer CONFIG QUIET)
 if(meshoptimizer_FOUND)

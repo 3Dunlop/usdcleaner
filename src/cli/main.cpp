@@ -1,18 +1,84 @@
 #include "core/pipeline/StageProcessor.h"
 #include "core/pipeline/BatchProcessor.h"
 
+#include <pxr/base/plug/registry.h>
+
 #include <iostream>
 #include <string>
 #include <filesystem>
 #include <fstream>
 
 #ifdef USDCLEANER_HAS_CLI11
-#include <CLI/CLI.hpp>
+// vcpkg's CLI.hpp force-defines CLI11_COMPILE (precompiled/split mode), but
+// linking the precompiled .lib fails due to MSVC toolchain version mismatch.
+// Include the individual headers directly to bypass CLI.hpp's forced define
+// and use CLI11 in header-only (inline) mode.
+#include <CLI/Version.hpp>
+#include <CLI/Macros.hpp>
+#include <CLI/Encoding.hpp>
+#include <CLI/Argv.hpp>
+#include <CLI/StringTools.hpp>
+#include <CLI/Error.hpp>
+#include <CLI/TypeTools.hpp>
+#include <CLI/Split.hpp>
+#include <CLI/ConfigFwd.hpp>
+#include <CLI/Validators.hpp>
+#include <CLI/FormatterFwd.hpp>
+#include <CLI/Option.hpp>
+#include <CLI/App.hpp>
+#include <CLI/Config.hpp>
+#include <CLI/Formatter.hpp>
+#include <CLI/ExtraValidators.hpp>
 #endif
 
+PXR_NAMESPACE_USING_DIRECTIVE
 namespace fs = std::filesystem;
 
+// Register any USD plugins shipped alongside the executable (e.g., usdFbx).
+// USD's PlugRegistry::RegisterPlugins() requires the path to the directory
+// that directly contains plugInfo.json.  We search candidate root dirs for
+// plugInfo.json files and register each one's parent directory.
+static void RegisterLocalPlugins(const char* argv0) {
+    auto& reg = PlugRegistry::GetInstance();
+
+    // Resolve exe directory — handle both absolute and relative argv[0]
+    fs::path exePath(argv0);
+    if (exePath.parent_path().empty()) {
+        exePath = fs::current_path() / exePath;
+    }
+    auto exeDir = fs::canonical(exePath.parent_path());
+
+    // Search several candidate root directories for plugins:
+    // 1. <exe_dir>/plugin/usd/          -- installed layout
+    // 2. <exe_dir>/../../../plugin/usd/  -- MSVC build layout (exe in src/cli/Release/)
+    std::vector<fs::path> roots = {
+        exeDir / "plugin" / "usd",
+        exeDir / ".." / ".." / ".." / "plugin" / "usd"
+    };
+
+    for (auto& root : roots) {
+        if (!fs::exists(root)) continue;
+        auto canonRoot = fs::canonical(root);
+
+        // Find all plugInfo.json files and register their directories
+        for (auto& entry : fs::recursive_directory_iterator(canonRoot)) {
+            if (entry.is_regular_file() && entry.path().filename() == "plugInfo.json") {
+                auto plugDir = entry.path().parent_path().string();
+                auto plugins = reg.RegisterPlugins(plugDir);
+                if (!plugins.empty()) {
+                    std::cout << "[Plugin] Registered " << plugins.size()
+                              << " plugin(s) from " << plugDir << "\n";
+                }
+            }
+        }
+        return;  // Only use the first existing root
+    }
+}
+
 int main(int argc, char* argv[]) {
+    // Register local plugins before any USD operations
+    RegisterLocalPlugins(argv[0]);
+
 #ifdef USDCLEANER_HAS_CLI11
     CLI::App app{"USDCleaner - USD Geometry & Material Optimization Pipeline"};
     app.set_version_flag("--version", "0.1.0");
@@ -51,6 +117,13 @@ int main(int argc, char* argv[]) {
     app.add_flag("--enable-hierarchy-flatten", enableHierarchyFlatten, "Enable hierarchy flattening");
     app.add_flag("--no-normalize-centroids", noNormalizeCentroids, "Disable centroid normalization for instancing");
     app.add_flag("--enable-scale-normalization", enableScaleNormalization, "Enable scale-invariant instancing");
+
+    // FBX import options
+    std::string fbxUpAxis = "z";
+    float fbxUnitScale = 1.0f;
+    app.add_option("--fbx-up-axis", fbxUpAxis, "FBX up axis: y or z (default: z for BIM/CAD)")
+        ->check(CLI::IsMember({"y", "z"}));
+    app.add_option("--fbx-unit-scale", fbxUnitScale, "FBX unit scale factor (default: 1.0)");
 
     // Welding options
     float epsilon = 0.0f;
@@ -91,6 +164,9 @@ int main(int argc, char* argv[]) {
     config.enableCacheOptimization = !noCacheOpt;
     config.triangulate = triangulate;
     config.outputFormat = format;
+
+    config.fbxUpAxis = fbxUpAxis;
+    config.fbxUnitScale = fbxUnitScale;
 
     if (epsilon > 0.0f) {
         config.autoEpsilon = false;

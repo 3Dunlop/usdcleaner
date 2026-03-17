@@ -12,6 +12,7 @@ set(USDCLEANER_CORE_SOURCES
     materials/MaterialHasher.cpp
     materials/MaterialDeduplicator.cpp
     cache/GpuCacheOptimizer.cpp
+    import/FbxImportFixup.cpp
     instancing/GeometryHasher.cpp
     instancing/PointInstancerAuthor.cpp
     hierarchy/HierarchyFlattener.cpp
@@ -39,6 +40,7 @@ set(USDCLEANER_CORE_HEADERS
     materials/MaterialHasher.h
     materials/MaterialDeduplicator.h
     cache/GpuCacheOptimizer.h
+    import/FbxImportFixup.h
     instancing/GeometryHasher.h
     instancing/PointInstancerAuthor.h
     hierarchy/HierarchyFlattener.h
@@ -68,6 +70,7 @@ if(pxr_FOUND)
         gf
         vt
         ar
+        plug
         usdGeom
         usdShade
         usdUtils

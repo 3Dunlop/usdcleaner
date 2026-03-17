@@ -13,6 +13,14 @@ void Pipeline::AddPass(OptimizationPassPtr pass) {
     passes_.push_back(std::move(pass));
 }
 
+void Pipeline::InsertPass(size_t index, OptimizationPassPtr pass) {
+    if (index >= passes_.size()) {
+        passes_.push_back(std::move(pass));
+    } else {
+        passes_.insert(passes_.begin() + static_cast<ptrdiff_t>(index), std::move(pass));
+    }
+}
+
 void Pipeline::Execute(const UsdStageRefPtr& stage) {
     if (!stage) {
         std::cerr << "[Pipeline] Error: null stage\n";

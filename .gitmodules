@@ -1,0 +1,3 @@
+[submodule "external/usdFBX"]
+	path = external/usdFBX
+	url = https://github.com/Remedy-Entertainment/usdFBX.git

@@ -35,6 +35,16 @@ include(Dependencies)
 add_subdirectory(src/core)
 add_subdirectory(src/cli)
 
+option(USDCLEANER_BUILD_FBX_PLUGIN "Build usdFBX plugin for direct FBX file support (requires FBX SDK)" OFF)
+if(USDCLEANER_BUILD_FBX_PLUGIN)
+    if(FBXSDK_FOUND)
+        add_subdirectory(src/plugin)
+    else()
+        message(WARNING "USDCLEANER_BUILD_FBX_PLUGIN is ON but FBX SDK was not found. "
+                        "Set FBXSDK_ROOT to your FBX SDK installation.")
+    endif()
+endif()
+
 option(USDCLEANER_BUILD_BINDINGS "Build Python bindings" ON)
 if(USDCLEANER_BUILD_BINDINGS)
     add_subdirectory(src/bindings)

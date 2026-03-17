@@ -23,8 +23,8 @@ void BatchProcessor::ProcessDirectory(const std::string& inputDir) {
     for (const auto& entry : fs::directory_iterator(inputDir)) {
         if (!entry.is_regular_file()) continue;
         std::string ext = entry.path().extension().string();
-        // Match common USD extensions
-        if (ext == ".usd" || ext == ".usda" || ext == ".usdc") {
+        // Match USD and FBX extensions
+        if (ext == ".usd" || ext == ".usda" || ext == ".usdc" || ext == ".fbx") {
             files.push_back(entry.path().string());
         }
     }
@@ -32,7 +32,7 @@ void BatchProcessor::ProcessDirectory(const std::string& inputDir) {
     std::sort(files.begin(), files.end());
 
     std::cout << "[BatchProcessor] Found " << files.size()
-              << " USD files in " << inputDir << "\n";
+              << " input files in " << inputDir << "\n";
 
     ProcessFiles(files);
 }

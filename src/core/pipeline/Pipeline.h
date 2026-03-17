@@ -19,8 +19,11 @@ class USDCLEANER_API Pipeline {
 public:
     Pipeline();
 
-    // Add a pass to the pipeline (executed in order of addition)
+    // Add a pass to the end of the pipeline
     void AddPass(OptimizationPassPtr pass);
+
+    // Insert a pass at a specific position (0 = beginning)
+    void InsertPass(size_t index, OptimizationPassPtr pass);
 
     // Execute all enabled passes on the stage
     void Execute(const UsdStageRefPtr& stage);

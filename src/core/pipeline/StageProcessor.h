@@ -44,6 +44,10 @@ struct USDCLEANER_API ProcessorConfig {
 
     // Output format
     std::string outputFormat = "usdc";  // "usdc" or "usda"
+
+    // FBX import options (applied by FbxImportFixup pass when input is .fbx)
+    std::string fbxUpAxis = "z";      // "y" or "z" (BIM/CAD convention)
+    float fbxUnitScale = 1.0f;        // Unit scale factor (1.0 = no change)
 };
 
 // Processes a single USD file through the optimization pipeline.
