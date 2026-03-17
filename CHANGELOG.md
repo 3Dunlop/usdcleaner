@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.5.0 — 2026-03-17: Direct FBX Import
+
+Added direct FBX file support via Remedy Entertainment's usdFBX SdfFileFormat plugin. USDCleaner can now accept `.fbx` files directly as input, eliminating the need for an external FBX-to-USD converter in the BIM workflow.
+
+### New Features
+
+- **Direct FBX input**: `usdcleaner model.fbx -o output.usdc` works out of the box when built with `-DUSDCLEANER_BUILD_FBX_PLUGIN=ON`
+- **usdFBX plugin integration**: Remedy's open-source USD file format plugin compiled as a MODULE library (`usdFbx.dll`), auto-discovered at runtime from exe-relative paths
+- **FbxImportFixup pass**: BIM-specific post-import corrections automatically inserted when processing FBX files:
+  - Up-axis correction (FBX default Y-up → Z-up for BIM/CAD)
+  - Unit scale configuration
+  - Empty group pruning (removes leaf Xforms with no mesh descendants)
+- **CLI options**: `--fbx-up-axis {y,z}` and `--fbx-unit-scale <float>` for FBX import control
+- **Batch FBX support**: `.fbx` files are now included in batch directory scanning
+- **Pipeline::InsertPass()**: New method to insert passes at specific pipeline positions
+
+### Build Changes
+
+- New CMake option: `USDCLEANER_BUILD_FBX_PLUGIN` (OFF by default)
+- New CMake module: `cmake/FindFBXSDK.cmake` for Autodesk FBX SDK discovery
+- New git submodule: `external/usdFBX` (Remedy Entertainment's usdFBX)
+- Patched `UsdFbxFileformat.h` to avoid Windows case-insensitive `VERSION`/`<version>` header conflict
+- FBX SDK statically linked (`libfbxsdk-md.lib` + companion libs)
+
+### Technical Details
+
+- FBX stages are flattened to a writable anonymous `SdfLayer` before optimization (usdFBX provides a read-only `SdfAbstractData`)
+- Plugin uses `PlugRegistry::RegisterPlugins()` with recursive `plugInfo.json` discovery
+- CLI11 used in header-only mode to work around vcpkg/MSVC toolchain ABI mismatch
+
+### FBX Test Results (Navisworks BIM export)
+
+Tested on `QC00912021-JCB-MOD-3DM-ARC-3H-3H00-00001.fbx` (~40 MB, 356 meshes):
+- FbxImportFixup: up axis Y → Z
+- MetadataStripper: 356 redundant subdiv attrs removed
+- IdentityXformStripper: 1,469 identity xformOps cleared
+- VertexWelding: 42,516 → 42,047 vertices
+- DegenerateFaceRemoval: 78,173 → 78,155 faces (18 removed)
+- LaminaFaceRemoval: 78,155 → 78,045 faces (110 removed)
+- MaterialDeduplication: 53 → 25 materials (28 duplicates)
+- Output: 4.01 MB optimized USDC
+
+---
+
+## v0.4.0 — 2026-03-14: Centroid-Normalized Instancing (v5)
+
+- Centroid normalization for instancing: meshes with identical shape but different offsets now match
+- Multi-material prototype support in PointInstancer
+- minInstanceCount lowered to 2 (default)
+- Descriptive prototype naming from source mesh names
+- 47 tests across 11 suites
+
+---
+
 ## v0.3.0 — 2026-03-13: Correctness Fixes (Phase 1 + Phase 2)
 
 Deep review of all 9 optimization passes, fixing 4 critical bugs, 5 high-severity issues, and 2 medium-severity issues. All fixes include regression tests. Verified on 12 real Navisworks BIM files (1.6 GB).

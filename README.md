@@ -1,15 +1,26 @@
 # USDCleaner
 
-High-performance USD geometry and material optimization pipeline for BIM data exported from Autodesk Navisworks via FBX.
+High-performance USD geometry and material optimization pipeline for BIM data exported from Autodesk Navisworks. Accepts both USD and FBX files directly -- no external converter needed.
 
 ## What It Does
 
 BIM data exported from Navisworks produces heavily bloated USD stages: disconnected vertices at every face boundary, thousands of cloned materials with numerical suffixes, redundant metadata, deep single-child Xform chains, and zero geometric instancing. USDCleaner applies rigorous topological and semantic optimization to produce real-time-ready `.usdc` assets for NVIDIA Omniverse, Unreal Engine, and similar Hydra-based renderers.
 
+With the built-in FBX import plugin, you can skip the separate FBX-to-USD conversion step entirely:
+
+```bash
+# Direct FBX to optimized USD (requires FBX plugin build)
+usdcleaner model.fbx -o model_optimized.usdc
+
+# Traditional USD input still works
+usdcleaner model.usd -o model_optimized.usdc
+```
+
 ### Optimization Pipeline
 
 | Pass | Description | Default |
 |------|-------------|---------|
+| **FBX Import Fixup** | BIM-specific post-import corrections: up-axis (Y→Z), unit scale, empty group pruning | Auto (FBX input only) |
 | **Metadata Stripping** | Removes authored `customData['userDocBrief']`, empty arrays, None-valued attributes (preserving time-sampled data and UsdShade connections), and redundant subdivision defaults | On |
 | **Identity Xform Stripping** | Clears identity xformOps (transforms that compose to the identity matrix), preserving animated transforms | On |
 | **Vertex Welding** | Spatial-hash-based O(N) welding of coincident vertices with auto-epsilon detection and bounds validation | On |
@@ -23,12 +34,12 @@ BIM data exported from Navisworks produces heavily bloated USD stages: disconnec
 ### Pass Ordering
 
 ```
-MetadataStripper → IdentityXformStripper → VertexWelding → DegenerateFaceRemoval →
-LaminaFaceRemoval → MaterialDeduplication → [PointInstancerAuthor] → [HierarchyFlattener] →
-GpuCacheOptimization
+[FbxImportFixup] → MetadataStripper → IdentityXformStripper → VertexWelding →
+DegenerateFaceRemoval → LaminaFaceRemoval → MaterialDeduplication →
+[PointInstancerAuthor] → [HierarchyFlattener] → GpuCacheOptimization
 ```
 
-Bracketed passes are off by default and enabled via CLI flags.
+Bracketed passes are off by default. FbxImportFixup is automatically inserted when the input is an `.fbx` file.
 
 ## Requirements
 
@@ -37,6 +48,7 @@ Bracketed passes are off by default and enabled via CLI flags.
 - **CMake**: 3.26+
 - **OpenUSD**: NVIDIA pre-built v25.08 ([download](https://developer.nvidia.com/usd))
 - **vcpkg**: For meshoptimizer, Google Test, CLI11
+- **Autodesk FBX SDK** (optional): 2020.3.9+ for direct FBX file import ([download](https://aps.autodesk.com/developer/overview/fbx-sdk))
 
 ## Build
 
@@ -69,6 +81,24 @@ cmake -S . -B build -G "Visual Studio 17 2022" -A x64 \
 cmake --build build --config Release
 ```
 
+### 3a. With FBX Import Support (Optional)
+
+To enable direct `.fbx` file input, install the [Autodesk FBX SDK](https://aps.autodesk.com/developer/overview/fbx-sdk) and initialize the usdFBX submodule:
+
+```bash
+git submodule update --init external/usdFBX
+
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64 \
+  -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake \
+  -DUSD_ROOT=%USD_ROOT% \
+  -DUSDCLEANER_BUILD_FBX_PLUGIN=ON \
+  -DUSDCLEANER_BUILD_BINDINGS=OFF
+
+cmake --build build --config Release
+```
+
+The FBX SDK is auto-detected from its default install location (`C:\Program Files\Autodesk\FBX\FBX SDK\`). The `usdFbx.dll` plugin is built into `build/plugin/usd/usdFbx/` and auto-discovered by the CLI at runtime.
+
 ### 4. Run Tests
 
 Tests require USD and Python DLLs on PATH. Use the provided PowerShell scripts:
@@ -100,6 +130,12 @@ build\tests\Release\test_vertex_welder.exe
 # Single file (default 7 passes)
 usdcleaner input.usd -o output.usdc
 
+# Direct FBX input (requires FBX plugin build)
+usdcleaner model.fbx -o model_optimized.usdc
+
+# FBX with BIM-specific options
+usdcleaner model.fbx -o output.usdc --fbx-up-axis z --fbx-unit-scale 1.0
+
 # With options
 usdcleaner input.usd -o output.usdc --epsilon 1e-5 --no-cache-opt --format usda
 
@@ -117,9 +153,11 @@ usdcleaner input.usd -o output.usdc \
   --no-normalize-centroids \
   --enable-scale-normalization \
   --enable-hierarchy-flatten \
+  --fbx-up-axis z \
+  --fbx-unit-scale 1.0 \
   --format usdc
 
-# Batch directory
+# Batch directory (processes .usd, .usda, .usdc, and .fbx files)
 usdcleaner ./input_dir/ -o ./output_dir/
 ```
 
@@ -150,14 +188,19 @@ src/
     metadata/     # MetadataStripper, IdentityXformStripper
     instancing/   # GeometryHasher, PointInstancerAuthor
     hierarchy/    # HierarchyFlattener
+    import/       # FbxImportFixup (BIM post-import corrections)
     pipeline/     # OptimizationPass, Pipeline, StageProcessor, BatchProcessor
-  cli/            # CLI executable
+  cli/            # CLI executable (with plugin auto-discovery)
+  plugin/         # USD file format plugins
+    patches/      # Patched headers for usdFBX Windows build
   bindings/       # Python bindings (boost::python)
+external/
+  usdFBX/         # Remedy Entertainment's usdFBX SdfFileFormat plugin (submodule)
 python/           # Python package (orchestration layer)
 tests/
   cpp/            # Google Test unit and integration tests (47 tests, 11 suites)
   data/           # Test USD files
-cmake/            # CMake modules and USD dependency stubs
+cmake/            # CMake modules (FindFBXSDK.cmake, USD dependency stubs)
 ```
 
 ## Architecture
