@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.6.0 — 2026-03-17: Fix Critical FBX Geometry Loss
+
+Fixed a critical bug where Navisworks FBX exports with duplicate sibling node names caused massive silent geometry loss during import.
+
+### Critical Bug Fix
+
+- **usdFBX duplicate sibling name handling** — Navisworks FBX exports create sibling FBX nodes with identical names (e.g., multiple "Floor" Xforms, multiple "Site___Earth" Meshes under the same parent). FBX format uses internal node IDs so this is valid, but USD requires unique prim paths. The usdFBX plugin's `cleanName()` function only deduplicated names that needed sanitization; valid USD identifiers passed through unchecked, causing duplicate paths in the PrimMap (last-wins = geometry overwritten). Two patches fix this:
+  - `src/plugin/patches/Helpers.h`: Modified `cleanName()` to ALWAYS check `usedNames` for duplicates, even for already-valid identifiers
+  - `external/usdFBX/src/UsdFbxDataReader.cpp`: Added sibling deduplication in `collectFbxNodes()` — checks `context.GetPrim(candidatePath)` and appends `_1`, `_2`, etc. if path already exists
+
+### Impact
+
+- **ARC-3H00**: 356 meshes → 4,289 meshes recovered (12x more geometry preserved)
+- **LSE-3H31**: 22 meshes → 55 meshes (all geometry preserved)
+- Previous batch results showed 74.56% file size reduction but were **invalid** — geometry was being silently dropped
+- Corrected batch: 2,510 MB FBX → 2,230 MB USDC (11.16% reduction) with all geometry preserved
+
+### FBX Batch Results (65 Navisworks files, full 10-pass pipeline)
+
+- **Total: 2,510 MB → 2,230 MB (11.16% reduction, 280 MB saved)**
+- **65/65 files processed successfully**
+- Best results: LSE (landscape) 187→35 MB (81%), STR (structural) 64→35 MB (45%)
+- 27/65 files grew slightly due to `Flatten()` overhead — correct behavior with all geometry preserved
+
+---
+
 ## v0.5.0 — 2026-03-17: Direct FBX Import
 
 Added direct FBX file support via Remedy Entertainment's usdFBX SdfFileFormat plugin. USDCleaner can now accept `.fbx` files directly as input, eliminating the need for an external FBX-to-USD converter in the BIM workflow.
@@ -32,15 +58,14 @@ Added direct FBX file support via Remedy Entertainment's usdFBX SdfFileFormat pl
 
 ### FBX Test Results (Navisworks BIM export)
 
-Tested on `QC00912021-JCB-MOD-3DM-ARC-3H-3H00-00001.fbx` (~40 MB, 356 meshes):
+Tested on `QC00912021-JCB-MOD-3DM-ARC-3H-3H00-00001.fbx` (~40 MB):
 - FbxImportFixup: up axis Y → Z
-- MetadataStripper: 356 redundant subdiv attrs removed
-- IdentityXformStripper: 1,469 identity xformOps cleared
-- VertexWelding: 42,516 → 42,047 vertices
-- DegenerateFaceRemoval: 78,173 → 78,155 faces (18 removed)
-- LaminaFaceRemoval: 78,155 → 78,045 faces (110 removed)
+- MetadataStripper: redundant subdiv attrs removed
+- IdentityXformStripper: identity xformOps cleared
 - MaterialDeduplication: 53 → 25 materials (28 duplicates)
-- Output: 4.01 MB optimized USDC
+- Output: 25.49 MB optimized USDC (4,289 meshes preserved)
+
+> **Note**: Initial v0.5.0 results reported 356 meshes / 4.01 MB output. This was caused by a duplicate sibling name bug (fixed in v0.6.0) that silently dropped ~92% of geometry.
 
 ---
 

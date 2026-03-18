@@ -243,10 +243,30 @@ The optimization passes include the following safety measures:
 - **Multi-material instancing**: Meshes with identical geometry but different material bindings are grouped into a single PointInstancer with multiple prototypes (one per unique material), using `protoIndices` to map each instance to its material variant.
 - **Descriptive prototype naming**: PointInstancerAuthor derives prototype names from source mesh/parent names (e.g., `proto_WallPanel`) instead of generic `proto_0` numbering.
 - **Concave polygon safety**: GpuCacheOptimizer detects n-gons (faces with >4 vertices) and skips meshes containing them to avoid incorrect fan triangulation.
+- **FBX duplicate sibling name handling**: Navisworks FBX exports create sibling nodes with identical names (e.g., multiple "Floor" Xforms under the same parent). The usdFBX plugin is patched to uniquify these names (`Floor`, `Floor_1`, `Floor_2`, etc.) at import time, preventing silent geometry loss from USD path collisions.
 
 ## Real BIM File Results
 
-Tested on 12 Navisworks USD files (1,606 MB total input) with the full 9-pass pipeline:
+### FBX Batch (65 Navisworks FBX files, 2.5 GB total)
+
+Tested with the full 10-pass pipeline (`--enable-instancing --enable-hierarchy-flatten`):
+
+**Total: 2,510 MB FBX → 2,230 MB USDC (11.16% reduction, 280 MB saved)**
+
+All 65 files processed successfully. Best results by discipline:
+
+| Discipline | Input | Output | Reduction |
+|-----------|-------|--------|-----------|
+| LSE (landscape) | 187 MB | 35 MB | 81% — repetitive plant geometry |
+| STR (structural) | 64 MB | 35 MB | 45% — repeated structural elements |
+| ARC (architecture) | 253 MB | 166 MB | 34% — moderate instancing |
+| MEC (mechanical) | 1,398 MB | 1,300 MB | 7% — already efficient geometry |
+
+27 of 65 files grew slightly due to `Flatten()` overhead (FBX read-only stage must be flattened to a writable layer, which expands composed values to explicit authored data). This is correct behavior — all geometry is preserved.
+
+### USD Input (12 Navisworks USD files, 1.6 GB total)
+
+Tested with the full 9-pass pipeline:
 
 | File | Input | Output | Materials | Meshes Instanced | Time |
 |------|-------|--------|-----------|-----------------|------|
@@ -266,9 +286,8 @@ Tested on 12 Navisworks USD files (1,606 MB total input) with the full 9-pass pi
 
 Key optimizations:
 - **Material deduplication**: 53,626 → 283 unique materials (99.5% reduction)
-- **Centroid-normalized instancing**: 17,304 meshes instanced (43% of all meshes) into 5,309 PointInstancers — up from 243 meshes (0.6%) in v4 before centroid normalization
+- **Centroid-normalized instancing**: 17,304 meshes instanced (43% of all meshes) into 5,309 PointInstancers
 - **RND-INT highlight**: 14,064 of 19,082 meshes (74%) instanced, reducing file from 714 MB to 697 MB
-- **File size**: 19.15 MB total reduction (1.19%) — 4x more than v4's 5.04 MB (0.31%)
 - **Scene graph**: 124K intermediate Xform prims flattened
 
 ## License
